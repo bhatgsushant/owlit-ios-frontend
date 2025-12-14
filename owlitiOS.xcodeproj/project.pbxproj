@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C6120B722ECD241300A7C428 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = C6120B712ECD241300A7C428 /* Lottie */; };
+		C6C82E262EC7F98300976527 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = C6C82E252EC7F98300976527 /* GoogleSignIn */; };
+		C6C82E282EC7F98300976527 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C6C82E272EC7F98300976527 /* GoogleSignInSwift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		C6C82DE02EC6A71F00976527 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -23,15 +29,41 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		C6120B6F2ECD214E00A7C428 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		C6C82DD22EC6A71E00976527 /* owlitiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = owlitiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C6C82DDF2EC6A71F00976527 /* owlitiOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = owlitiOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C6C82DE92EC6A71F00976527 /* owlitiOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = owlitiOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		C6C82E222EC7DC1500976527 /* Exceptions for "owlitiOS" folder in "owlitiOS" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C6C82DD12EC6A71E00976527 /* owlitiOS */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		C6C82DD42EC6A71E00976527 /* owlitiOS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C6C82E222EC7DC1500976527 /* Exceptions for "owlitiOS" folder in "owlitiOS" target */,
+			);
 			path = owlitiOS;
 			sourceTree = "<group>";
 		};
@@ -52,6 +84,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C6C82E262EC7F98300976527 /* GoogleSignIn in Frameworks */,
+				C6C82E282EC7F98300976527 /* GoogleSignInSwift in Frameworks */,
+				C6120B722ECD241300A7C428 /* Lottie in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -102,6 +137,7 @@
 				C6C82DCE2EC6A71E00976527 /* Sources */,
 				C6C82DCF2EC6A71E00976527 /* Frameworks */,
 				C6C82DD02EC6A71E00976527 /* Resources */,
+				C6120B6F2ECD214E00A7C428 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -112,6 +148,9 @@
 			);
 			name = owlitiOS;
 			packageProductDependencies = (
+				C6C82E252EC7F98300976527 /* GoogleSignIn */,
+				C6C82E272EC7F98300976527 /* GoogleSignInSwift */,
+				C6120B712ECD241300A7C428 /* Lottie */,
 			);
 			productName = owlitiOS;
 			productReference = C6C82DD22EC6A71E00976527 /* owlitiOS.app */;
@@ -195,6 +234,11 @@
 			);
 			mainGroup = C6C82DC92EC6A71E00976527;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C6C82E232EC7F68800976527 /* XCRemoteSwiftPackageReference "SwiftyTesseract" */,
+				C6C82E242EC7F69C00976527 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				C6120B702ECD241300A7C428 /* XCRemoteSwiftPackageReference "lottie-spm" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C6C82DD32EC6A71E00976527 /* Products */;
 			projectDirPath = "";
@@ -321,7 +365,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -378,7 +422,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -393,10 +437,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = owlitiOS/owlitiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WSQ76JM6K8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = owlitiOS/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -424,10 +472,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = owlitiOS/owlitiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WSQ76JM6K8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = owlitiOS/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -570,6 +622,51 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C6120B702ECD241300A7C428 /* XCRemoteSwiftPackageReference "lottie-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/airbnb/lottie-spm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.5.2;
+			};
+		};
+		C6C82E232EC7F68800976527 /* XCRemoteSwiftPackageReference "SwiftyTesseract" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/SwiftyTesseract/SwiftyTesseract";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.0.1;
+			};
+		};
+		C6C82E242EC7F69C00976527 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C6120B712ECD241300A7C428 /* Lottie */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C6120B702ECD241300A7C428 /* XCRemoteSwiftPackageReference "lottie-spm" */;
+			productName = Lottie;
+		};
+		C6C82E252EC7F98300976527 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C6C82E242EC7F69C00976527 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		C6C82E272EC7F98300976527 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C6C82E242EC7F69C00976527 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = C6C82DCA2EC6A71E00976527 /* Project object */;
 }
