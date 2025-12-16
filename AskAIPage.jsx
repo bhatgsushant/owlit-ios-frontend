@@ -1,11 +1,39 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Loader2, Plus, Sparkles } from 'lucide-react';
+import { Send, Loader2, Sparkles, Plus, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { motion, AnimatePresence } from 'framer-motion';
 import AnimatedSection from '@/components/ui/AnimatedSection';
 
+// Feedback Buttons Component
+const FeedbackButtons = ({ onFeedback }) => {
+  const [feedback, setFeedback] = useState(null);
+
+  const handleClick = (type) => {
+    const newVal = feedback === type ? null : type;
+    setFeedback(newVal);
+    if (newVal) onFeedback(newVal);
+  };
+
+  return (
+    <div className="flex gap-2 mt-1.5 px-1">
+      <button
+        onClick={() => handleClick('good')}
+        className={`flex items-center gap-1.5 text-xs font-medium transition-colors border border-black/5 rounded-full px-2 py-0.5 bg-white/50 backdrop-blur-sm shadow-sm ${feedback === 'good' ? 'text-slate-700 bg-emerald-50 border-emerald-200' : 'text-slate-400 hover:text-slate-600'}`}
+      >
+        Good <ThumbsUp className={`w-3 h-3 ${feedback === 'good' ? 'fill-slate-700' : ''}`} />
+      </button>
+      <button
+        onClick={() => handleClick('bad')}
+        className={`flex items-center gap-1.5 text-xs font-medium transition-colors border border-black/5 rounded-full px-2 py-0.5 bg-white/50 backdrop-blur-sm shadow-sm ${feedback === 'bad' ? 'text-slate-700 bg-red-50 border-red-200' : 'text-slate-400 hover:text-slate-600'}`}
+      >
+        Bad <ThumbsDown className={`w-3 h-3 ${feedback === 'bad' ? 'fill-slate-700' : ''}`} />
+      </button>
+    </div>
+  );
+};
+
 export default function AskAIPage() {
-  const { fetchWithAuth } = useAuth();
+  const { user, fetchWithAuth } = useAuth();
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   // State for active messages (always starts fresh)
@@ -36,9 +64,26 @@ export default function AskAIPage() {
     }
   }, [messages]);
 
-  const sendMessage = async (e) => {
-    e.preventDefault();
-    const text = question.trim();
+  const handleFeedback = async (msg, type) => {
+    try {
+      console.log('Sending feedback:', type, 'for memory:', msg.memory_id);
+      await fetchWithAuth('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: msg.question,
+          answer: msg.text,
+          feedback: type,
+          memory_id: msg.memory_id
+        }),
+      });
+    } catch (err) {
+      console.error('Failed to send feedback:', err);
+    }
+  };
+
+  const handleSend = async (textOverride = null) => {
+    const text = textOverride || question.trim();
     if (!text || loading) return;
 
     setError('');
@@ -47,12 +92,16 @@ export default function AskAIPage() {
     const userMsg = { role: 'user', text };
     setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
+    setQuestion(''); // Clear input immediately for better UX
 
     try {
       const resp = await fetchWithAuth('/api/ask-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify({
+          question: text,
+          history: messages // Send recent chat history for context
+        }),
       });
 
       if (!resp.ok) {
@@ -63,6 +112,9 @@ export default function AskAIPage() {
         role: 'ai',
         text: data?.answer || 'No response',
         items: Array.isArray(data?.items_used) ? data.items_used : [],
+        memory_id: data?.memory_id,
+        question: text, // Store original question for feedback context
+        suggested_questions: data?.suggested_questions || []
       };
       setMessages((prev) => [...prev, aiMsg]);
     } catch (err) {
@@ -70,8 +122,12 @@ export default function AskAIPage() {
       setError('Something went wrong');
     } finally {
       setLoading(false);
-      setQuestion('');
     }
+  };
+
+  const sendMessage = (e) => {
+    e.preventDefault();
+    handleSend();
   };
 
   const suggestions = recentPrompts.length > 0 ? recentPrompts : [
@@ -96,7 +152,6 @@ export default function AskAIPage() {
         {/* Header */}
         <header className="px-6 py-4 border-b border-black/5 bg-white/40 backdrop-blur-md flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
-            {/* AI Icon Removed as requested */}
             <div>
               <h1 className="text-xl font-semibold tracking-tight text-slate-900 drop-shadow-sm font-playfair">Owlit AI</h1>
               <p className="text-xs text-slate-500 font-medium font-fk-grotesk">Your Personal Receipt AI Assistant</p>
@@ -152,50 +207,44 @@ export default function AskAIPage() {
                 initial={{ opacity: 0, y: 10, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ duration: 0.2 }}
-                className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'} mb-1`}
+                className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'} mb-4 group`}
               >
-                <div
-                  style={{ maxWidth: '80%' }}
-                  className={`relative px-4 py-2.5 text-xs leading-snug font-fk-grotesk ${msg.role === 'user'
-                    ? 'bg-[#007AFF] text-white rounded-[20px] ml-auto'
-                    : 'bg-[#F2F2F7] text-slate-900 rounded-[20px] mr-auto border border-black/5'
-                    }`}
-                >
-                  <div className="whitespace-pre-wrap tracking-wide">
-                    {msg.text.replace(/\*\*/g, '').split(/([£$]?\d+(?:[.,]\d+)?)/).map((part, i) =>
-                      /^[£$]?\d+(?:[.,]\d+)?$/.test(part) ? (
-                        <span key={i} className="font-berkeley bg-white text-slate-900 px-1.5 py-0.5 rounded-md mx-0.5 shadow-sm inline-block">{part}</span>
-                      ) : (
-                        part
-                      )
-                    )}
+                <div className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} max-w-[80%]`}>
+                  <div
+                    className={`relative px-4 py-2.5 text-xs leading-snug font-fk-grotesk ${msg.role === 'user'
+                      ? 'bg-[#007AFF] text-white rounded-[20px] rounded-tr-sm'
+                      : 'bg-[#F2F2F7] text-slate-900 rounded-[20px] rounded-tl-sm border border-black/5'
+                      }`}
+                  >
+                    <div className="whitespace-pre-wrap tracking-wide">
+                      {msg.text.replace(/\*\*/g, '').split(/([£$]?\d+(?:[.,]\d+)?)/).map((part, i) =>
+                        /^[£$]?\d+(?:[.,]\d+)?$/.test(part) ? (
+                          <span key={i} className="font-berkeley bg-white text-slate-900 px-1.5 py-0.5 rounded-md mx-0.5 shadow-sm inline-block">{part}</span>
+                        ) : (
+                          part
+                        )
+                      )}
+                    </div>
                   </div>
 
-                  {/* Used Items Source Card */}
-                  {msg.role === 'ai' && msg.items && msg.items.length > 0 && (
-                    <div className="mt-3 pt-2 border-t border-black/10">
-                      <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">
-                        Sources
-                      </div>
-                      <div className="space-y-1.5">
-                        {msg.items.map((it, i) => (
-                          <div
-                            key={i}
-                            className="bg-white rounded-lg p-2 flex flex-col gap-0.5 shadow-sm border border-black/5"
-                          >
-                            <div className="font-medium text-[12px] text-slate-900">
-                              {it.item_name || 'Item'}
-                            </div>
-                            <div className="flex flex-wrap gap-2 text-[10px] text-slate-500 font-semibold">
-                              <span className="font-berkeley text-slate-700">
-                                £{(it.price ?? 0).toFixed(2)}
-                              </span>
-                              {it.date && <span>{it.date}</span>}
-                              {it.merchant_name && <span>{it.merchant_name}</span>}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                  {/* Feedback Buttons */}
+                  {msg.role === 'ai' && (
+                    <div className="flex flex-col gap-2">
+                      <FeedbackButtons onFeedback={(type) => handleFeedback(msg, type)} />
+
+                      {msg.suggested_questions && msg.suggested_questions.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {msg.suggested_questions.map((suggestion, sIdx) => (
+                            <button
+                              key={sIdx}
+                              onClick={() => handleSend(suggestion)}
+                              className="text-xs bg-white/50 hover:bg-white border border-black/5 rounded-full px-3 py-1.5 text-slate-600 font-medium transition-all text-left shadow-sm hover:shadow active:scale-95"
+                            >
+                              {suggestion}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -259,6 +308,6 @@ export default function AskAIPage() {
           </form>
         </footer>
       </AnimatedSection>
-    </div >
+    </div>
   );
 }

@@ -13,9 +13,19 @@ struct ChatView: View {
     @State private var messages: [ChatMessage] = []
     @State private var isLoading: Bool = false
     
+    // Image Picker State
+    @State private var showImagePicker = false
+    @State private var pickerSourceType: UIImagePickerController.SourceType = .photoLibrary
+    @State private var selectedImage: UIImage?
+    
+    // Receipt Scanning State
+    @State private var scannedData: ReceiptData?
+    @State private var isProcessingImage = false
+    
     // Custom Colors
-    let creamyWhite = Color(hex: "FAF9F6") // Off-white/Cream
-    let headerWhite = Color(hex: "FDFDFD").opacity(0.95)
+    let pitchBlack = Color.black
+    let headerBlack = Color.black.opacity(0.95)
+    let bubbleGray = Color(white: 0.15) // for user bubbles or input background
     
     // Quick Replies (Matching AskAIPage.jsx suggestions)
     let quickReplies = [
@@ -36,7 +46,7 @@ struct ChatView: View {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 20, weight: .semibold))
                         }
-                        .foregroundColor(.black)
+                        .foregroundColor(.white)
                     }
                     .padding(.leading, 8)
                     
@@ -45,7 +55,7 @@ struct ChatView: View {
                     // Profile Info
                     Text("Owlit AI")
                         .font(.system(size: 18, weight: .semibold, design: .serif))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(.white)
                     
                     Spacer()
                     
@@ -56,9 +66,9 @@ struct ChatView: View {
                 .padding(.bottom, 8)
                 
                 // Separator
-                Divider()
+                Divider().background(Color.white.opacity(0.2))
             }
-            .background(headerWhite)
+            .background(headerBlack)
             
             // MARK: - Chat Area
             ScrollViewReader { proxy in
@@ -77,23 +87,21 @@ struct ChatView: View {
                                 Spacer(minLength: 50)
                                 Text("Where knowledge begins") 
                                     .font(.custom("FKGroteskTrial-Medium", size: 24))
-                                    .foregroundStyle(.black.opacity(0.7))
+                                    .foregroundStyle(.white.opacity(0.9))
                                 
-                                // Internal Quick Replies (Optional, if you want them in the empty state like Perplexity)
-                                // For now, relying on the keyboard suggestions or sticking to the design requested.
-                                // Adding the chips here as per AskAIPage.jsx behavior (suggestions in center)
+                                // Internal Quick Replies
                                 FlowLayout(spacing: 8) {
                                     ForEach(quickReplies, id: \.self) { reply in
                                         Button(action: { submitQuery(reply) }) {
                                             Text(reply)
                                                 .font(.custom("FKGroteskTrial-Medium", size: 13))
-                                                .foregroundStyle(.black.opacity(0.8))
+                                                .foregroundStyle(.white.opacity(0.9))
                                                 .padding(.vertical, 8)
                                                 .padding(.horizontal, 16)
-                                                .background(Color.white)
+                                                .background(Color(white: 0.1))
                                                 .overlay(
                                                     RoundedRectangle(cornerRadius: 20)
-                                                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
                                                 )
                                                 .clipShape(Capsule())
                                         }
@@ -105,8 +113,16 @@ struct ChatView: View {
                         
                         // Messages
                         ForEach(messages) { message in
-                            MessageBubble(message: message)
-                                .id(message.id)
+                            MessageBubble(
+                                message: message,
+                                onFeedback: { isPositive in
+                                    sendFeedback(message: message, isPositive: isPositive)
+                                },
+                                onSuggestionTap: { suggestion in
+                                    submitQuery(suggestion)
+                                }
+                            )
+                            .id(message.id)
                         }
                         
                         if isLoading {
@@ -120,7 +136,7 @@ struct ChatView: View {
                     }
                     .padding(.bottom, 16)
                 }
-                .background(creamyWhite)
+                .background(pitchBlack)
                 .onChange(of: messages.count) { _ in
                     withAnimation { proxy.scrollTo("BOTTOM", anchor: .bottom) }
                 }
@@ -134,20 +150,35 @@ struct ChatView: View {
                         .font(.custom("FKGroteskTrial-Medium", size: 18))
                         .padding(.horizontal, 4)
                         .padding(.top, 4)
+                        .foregroundColor(.white)
+                        .accentColor(.white)
                     
                     // 2. Action Row (Below Text)
                     HStack(spacing: 16) {
-                        // Plus Icon
+                        // Plus Icon (Attachment Mock)
                         Button(action: {}) {
                             Image(systemName: "plus")
                                 .font(.system(size: 20, weight: .regular))
                                 .foregroundColor(.gray)
                         }
                         
-                        // Camera Icon (Smaller as requested)
-                        Button(action: {}) {
+                        // Camera Icon
+                        Button(action: {
+                            pickerSourceType = .camera
+                            showImagePicker = true
+                        }) {
                             Image(systemName: "camera")
-                                .font(.system(size: 18, weight: .regular)) // Reduced size
+                                .font(.system(size: 18, weight: .regular))
+                                .foregroundColor(.gray)
+                        }
+                        
+                        // NEW: Photo/Gallery Icon
+                        Button(action: {
+                            pickerSourceType = .photoLibrary
+                            showImagePicker = true
+                        }) {
+                            Image(systemName: "photo")
+                                .font(.system(size: 18, weight: .regular))
                                 .foregroundColor(.gray)
                         }
                         
@@ -157,26 +188,177 @@ struct ChatView: View {
                         Button(action: { submitQuery(prompt) }) {
                             Image(systemName: "arrow.right")
                                 .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
+                                .foregroundColor(.black)
                                 .frame(width: 32, height: 32)
-                                .background(prompt.isEmpty ? Color.gray.opacity(0.3) : Color.black)
+                                .background(prompt.isEmpty ? Color.gray.opacity(0.3) : Color.white)
                                 .clipShape(Circle())
                         }
                         .disabled(prompt.isEmpty)
                     }
                 }
                 .padding(16)
-                .background(Color.white)
+                .background(Color(white: 0.12)) // Dark gray input bg
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .shadow(color: Color.black.opacity(0.08), radius: 15, x: 0, y: 5)
+                .shadow(color: Color.black.opacity(0.3), radius: 15, x: 0, y: 5)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
             }
-            .background(creamyWhite.opacity(0.8))
+            .background(pitchBlack)
         }
-        .background(creamyWhite)
-        .preferredColorScheme(.light)
+        .background(pitchBlack)
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(sourceType: pickerSourceType) { image in
+                handleImageSelection(image)
+            }
+        }
+        .sheet(item: $scannedData) { data in
+            if let img = selectedImage {
+                ScanReceiptView(image: img, data: data)
+                    .environmentObject(authManager)
+            }
+        }
     }
+    
+    func handleImageSelection(_ image: UIImage) {
+        selectedImage = image
+        isProcessingImage = true
+        
+        // Show in chat immediately with image and initial status
+        let msgId = UUID()
+        let initialMsg = ChatMessage(
+            content: "Analyzing receipt...", 
+            isUser: true, 
+            image: image,
+            isScanning: true
+        )
+        // We need to manually set ID to track updates, but ChatMessage.id is let.
+        // We'll rely on finding the message by its content/image reference or just index for now,
+        // but better to rebuild the list or use a class. For SwiftUI Structs, we replace the item.
+        // Let's rely on the fact we just appended it.
+        messages.append(initialMsg)
+        
+        // Rotating insights
+        let insights = [
+            "Detecting merchant details...",
+            "Reading line items...",
+            "Calculating total amount...",
+            "Categorizing products...",
+            "Checking for spending anomalies..."
+        ]
+        
+        // Perform Upload
+        guard let token = authManager.token,
+              let imageData = image.jpegData(compressionQuality: 0.6) else {
+            isProcessingImage = false
+            return
+        }
+        
+        Task {
+            // Start the insight rotation in a separate sub-task or just track it
+            // Since `uploadRequest` awaits, we need a parallel timer.
+            let startTime = Date()
+            var isFinished = false
+            
+            // Insight Rotation Task
+            Task {
+                var index = 0
+                while !isFinished {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                    if isFinished { break }
+                    
+                    let nextInsight = insights[index % insights.count]
+                    await MainActor.run {
+                        // Find by ID - this should now be stable if we preserve ID
+                        if let idx = messages.firstIndex(where: { $0.id == initialMsg.id }) {
+                            var updatedMsg = messages[idx]
+                            // Create new struct with updated content AND SAME ID
+                            messages[idx] = ChatMessage(
+                                id: initialMsg.id, // IMPN: Keep same ID
+                                content: nextInsight,
+                                isUser: updatedMsg.isUser,
+                                timestamp: updatedMsg.timestamp,
+                                items: updatedMsg.items,
+                                memoryId: updatedMsg.memoryId,
+                                suggestedQuestions: updatedMsg.suggestedQuestions,
+                                replyingToQuestion: updatedMsg.replyingToQuestion,
+                                image: updatedMsg.image,
+                                isScanning: true
+                            )
+                        }
+                    }
+                    index += 1
+                }
+            }
+            
+            do {
+                // Determine scan mode (default receipt)
+                let params = ["scanMode": "receipt", "highAccuracy": "false"]
+                
+                let (data, _) = try await APIClient.shared.uploadRequest(
+                    path: "/api/scan",
+                    data: imageData,
+                    fileName: "upload.jpg",
+                    mimeType: "image/jpeg",
+                    parameters: params,
+                    token: token
+                )
+                
+                // Decode Receipt Data
+                // The API returns the JSON directly
+                let receipt = try JSONDecoder().decode(ReceiptData.self, from: data)
+                
+                await MainActor.run {
+                    isFinished = true
+                    self.scannedData = receipt
+                    self.isProcessingImage = false
+                    
+                    // Update the chat message to indicate success
+                    if let idx = messages.firstIndex(where: { $0.id == initialMsg.id }) {
+                        let old = messages[idx]
+                        messages[idx] = ChatMessage(
+                            id: initialMsg.id, // Keep ID
+                            content: "Receipt Scanned",
+                            isUser: old.isUser,
+                            timestamp: old.timestamp,
+                            items: old.items,
+                            memoryId: old.memoryId,
+                            suggestedQuestions: old.suggestedQuestions,
+                            replyingToQuestion: old.replyingToQuestion,
+                            image: old.image,
+                            isScanning: false
+                        )
+                    }
+                    messages.append(ChatMessage(content: "Please review the details above.", isUser: false))
+                }
+            } catch {
+                print("Scan Error: \(error)")
+                await MainActor.run {
+                    isFinished = true
+                    self.isProcessingImage = false
+                    
+                    if let idx = messages.firstIndex(where: { $0.id == initialMsg.id }) {
+                        let old = messages[idx]
+                         messages[idx] = ChatMessage(
+                            id: initialMsg.id, // Keep ID
+                            content: "Failed to scan receipt",
+                            isUser: old.isUser,
+                            timestamp: old.timestamp,
+                            items: old.items,
+                            memoryId: old.memoryId,
+                            suggestedQuestions: old.suggestedQuestions,
+                            replyingToQuestion: old.replyingToQuestion,
+                            image: old.image,
+                            isScanning: false
+                        )
+                    }
+                    
+                    messages.append(ChatMessage(content: "❌ Error: \(error.localizedDescription)", isUser: false))
+                }
+            }
+        }
+    }
+
     
     // MARK: - Quick Replies View (No longer used in body)
     private var quickRepliesView: some View {
@@ -243,8 +425,17 @@ struct ChatView: View {
         Task {
             do {
                 // 1. Prepare Request
-                let body: [String: String] = ["question": trimmed]
-                let bodyData = try JSONEncoder().encode(body)
+                // Build history from existing messages (excluding the one we just added and any error messages)
+                let history = messages.dropLast().compactMap { msg -> [String: String]? in
+                    // Only include valid user/ai messages
+                    return ["role": msg.isUser ? "user" : "ai", "text": msg.content]
+                }
+                
+                let body: [String: Any] = [
+                    "question": trimmed,
+                    "history": history
+                ]
+                let bodyData = try JSONSerialization.data(withJSONObject: body)
                 
                 // 2. Fetch from API
                 let (data, response) = try await APIClient.shared.rawRequest(
@@ -268,7 +459,9 @@ struct ChatView: View {
                         let aiMsg = ChatMessage(
                             content: aiResponse.answer,
                             isUser: false,
-                            items: aiResponse.itemsUsed
+                            items: aiResponse.itemsUsed,
+                            memoryId: aiResponse.memoryId,
+                            suggestedQuestions: aiResponse.suggestedQuestions
                         )
                         messages.append(aiMsg)
                     }
@@ -286,6 +479,36 @@ struct ChatView: View {
         }
     }
     
+    private func sendFeedback(message: ChatMessage, isPositive: Bool) {
+        guard let memoryId = message.memoryId else { return }
+        
+        let feedbackType = isPositive ? "good" : "bad"
+        // Toggle UI state locally if needed, but for now we'll just fire the request
+        
+        Task {
+            do {
+                let feedbackBody: [String: Any] = [
+                    "question": message.replyingToQuestion ?? "", // We need to track the question this answered
+                    "answer": message.content,
+                    "feedback": feedbackType,
+                    "memory_id": memoryId
+                ]
+                
+                let bodyData = try JSONSerialization.data(withJSONObject: feedbackBody)
+                
+                _ = try await APIClient.shared.rawRequest(
+                    path: "/api/feedback",
+                    method: "POST",
+                    body: bodyData,
+                    token: authManager.token
+                )
+                print("Feedback sent: \(feedbackType)")
+            } catch {
+                print("Failed to send feedback: \(error)")
+            }
+        }
+    }
+    
     private var currentDateString: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
@@ -296,87 +519,137 @@ struct ChatView: View {
 // MARK: - Message Bubble
 struct MessageBubble: View {
     let message: ChatMessage
+    var onFeedback: ((Bool) -> Void)? = nil
+    var onSuggestionTap: ((String) -> Void)? = nil
+    @State private var feedbackGiven: Bool? = nil // nil, true (good), false (bad)
     
     var body: some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            if message.isUser {
-                Spacer()
-            }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                // Text Content
-                Text(message.content)
-                    .font(.custom("FKGroteskTrial-Regular", size: 18))
-                    .foregroundColor(message.isUser ? .black : .black.opacity(0.8))
-                    .fixedSize(horizontal: false, vertical: true) // Ensure multiline wraps
+        VStack(alignment: message.isUser ? .trailing : .leading, spacing: 6) {
+            HStack(alignment: .bottom, spacing: 4) {
+                if message.isUser {
+                    Spacer()
+                }
                 
-                // Sources Card (If AI and has items)
-                if !message.isUser, let items = message.items, !items.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("SOURCES")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.gray)
-                            .tracking(1) // uppercase tracking
-                        
-                        ForEach(items) { item in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.itemName ?? "Item")
+                VStack(alignment: .leading, spacing: 8) {
+                    // Image Display
+                    if let image = message.image {
+                        VStack(spacing: 8) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit() // Changed to fix aspect ratio
+                                .frame(maxWidth: 240) // Limit width but let height adjust
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                            
+                            if message.isScanning {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                        .tint(.white) // White spinner
+                                    Text(message.content)
                                         .font(.system(size: 13, weight: .medium))
-                                        .foregroundStyle(.black)
-                                    
-                                    HStack(spacing: 6) {
-                                        Text("£\(String(format: "%.2f", item.price ?? 0))")
-                                            .font(.custom("BerkeleyMono-Regular", size: 11))
-                                            .foregroundStyle(.black.opacity(0.8))
-                                        
-                                        if let merchant = item.merchantName {
-                                            Text("• \(merchant)")
-                                                .font(.system(size: 11))
-                                                .foregroundColor(.gray)
-                                        }
-                                        
-                                        if let date = item.date {
-                                            Text("• \(date)")
-                                                .font(.system(size: 11))
-                                                .foregroundColor(.gray)
-                                        }
-                                    }
+                                        .foregroundStyle(.white.opacity(0.9))
+                                        .multilineTextAlignment(.leading)
                                 }
-                                Spacer()
+                                .padding(12)
+                                .background(Color(white: 0.15).opacity(0.9)) // Darker background
+                                .cornerRadius(12)
                             }
-                            .padding(10)
-                            .background(Color.white)
-                            .cornerRadius(12)
-                            .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
-                            )
                         }
                     }
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
+                    
+                    // Text Content (Only if not scanning or if no image exist, or if we want to show text below image when finished)
+                    if message.image == nil || !message.isScanning {
+                        Text(message.content)
+                            .font(.custom("FKGroteskTrial-Regular", size: 15))
+                            .foregroundColor(.white.opacity(0.9)) // White text
+                            .fixedSize(horizontal: false, vertical: true) // Ensure multiline wraps
+                    }
+                    
+                    // Feedback Buttons (AI Only)
+                    if !message.isUser {
+                        HStack(spacing: 8) {
+                            Button(action: {
+                                feedbackGiven = true
+                                onFeedback?(true)
+                            }) {
+                                HStack(spacing: 4) {
+                                    Text("Good")
+                                        .font(.system(size: 12, weight: .medium))
+                                    Image(systemName: "hand.thumbsup")
+                                        .font(.system(size: 12))
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(feedbackGiven == true ? Color.green.opacity(0.2) : Color.white.opacity(0.1))
+                                .foregroundColor(feedbackGiven == true ? .green : .gray)
+                                .cornerRadius(12)
+                            }
+                            
+                            Button(action: {
+                                feedbackGiven = false
+                                onFeedback?(false)
+                            }) {
+                                HStack(spacing: 4) {
+                                    Text("Bad")
+                                        .font(.system(size: 12, weight: .medium))
+                                    Image(systemName: "hand.thumbsdown")
+                                        .font(.system(size: 12))
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(feedbackGiven == false ? Color.red.opacity(0.2) : Color.white.opacity(0.1))
+                                .foregroundColor(feedbackGiven == false ? .red : .gray)
+                                .cornerRadius(12)
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                .background(
+                    message.isUser ? Color(white: 0.15) : Color.black
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: message.isUser ? .trailing : .leading)
+                
+                if !message.isUser {
+                    Spacer()
                 }
             }
-            .padding(.vertical, 12)
             .padding(.horizontal, 16)
-            .background(
-                message.isUser ? Color(hex: "F3F3F3") : Color.white
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: message.isUser ? .trailing : .leading)
             
-            if !message.isUser {
-                Spacer()
+            // Suggested Questions (Below AI Bubble)
+            if !message.isUser, let suggestions = message.suggestedQuestions, !suggestions.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(suggestions, id: \.self) { suggestion in
+                            Button(action: { onSuggestionTap?(suggestion) }) {
+                                Text(suggestion)
+                                    .font(.system(size: 13, weight: .medium)) // Used system font for consistency with new additions
+                                    .foregroundStyle(Color.white.opacity(0.8))
+                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 16)
+                                    .background(Color(white: 0.1))
+                                    .cornerRadius(16)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                    )
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 32) // Indent slightly more than the bubble
+                }
+                .padding(.bottom, 8)
             }
         }
-        .padding(.horizontal, 16)
     }
 }
 
 // MARK: - Helper FlowLayout
 // Simple flow layout for tags/chips
+// (Kept if needed elsewhere, otherwise safe to keep for now)
 struct FlowLayout: Layout {
     var spacing: CGFloat
     
@@ -422,20 +695,53 @@ struct FlowLayout: Layout {
 
 // MARK: - Models
 struct ChatMessage: Identifiable {
-    let id = UUID()
+    let id: UUID
     let content: String
     let isUser: Bool
-    let timestamp = Date()
-    var items: [SourceItem]? = nil // Optional sources
+    let timestamp: Date
+    var items: [SourceItem]?
+    var memoryId: String?
+    var suggestedQuestions: [String]?
+    var replyingToQuestion: String?
+    
+    // Receipt Scanning
+    var image: UIImage?
+    var isScanning: Bool
+
+    init(id: UUID = UUID(), 
+         content: String, 
+         isUser: Bool, 
+         timestamp: Date = Date(), 
+         items: [SourceItem]? = nil, 
+         memoryId: String? = nil, 
+         suggestedQuestions: [String]? = nil, 
+         replyingToQuestion: String? = nil, 
+         image: UIImage? = nil, 
+         isScanning: Bool = false) {
+        self.id = id
+        self.content = content
+        self.isUser = isUser
+        self.timestamp = timestamp
+        self.items = items
+        self.memoryId = memoryId
+        self.suggestedQuestions = suggestedQuestions
+        self.replyingToQuestion = replyingToQuestion
+        self.image = image
+        self.isScanning = isScanning
+    }
 }
 
 struct AskAIResponse: Codable {
     let answer: String
     let itemsUsed: [SourceItem]?
+    let memoryId: String?
+    let suggestedQuestions: [String]?
     
     enum CodingKeys: String, CodingKey {
         case answer
         case itemsUsed = "items_used"
+        case memoryId = "memory_id"
+        case suggestedQuestions = "suggested_questions"
     }
 }
 

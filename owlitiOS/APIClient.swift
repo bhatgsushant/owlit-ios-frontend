@@ -110,4 +110,79 @@ class APIClient {
         
         return req
     }
+    // MARK: - Multipart Upload
+    func uploadRequest(
+        path: String,
+        method: String = "POST",
+        data: Data,
+        fileName: String,
+        mimeType: String,
+        parameters: [String: String]? = nil,
+        token: String?
+    ) async throws -> (Data, URLResponse) {
+        let url = baseURL.appendingPathComponent(path)
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        
+        // Generate Boundary
+        let boundary = "Boundary-\(UUID().uuidString)"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        // Auth Header
+        if let token = token {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        // Construct Body
+        req.httpBody = createMultipartBody(
+            data: data,
+            boundary: boundary,
+            fileName: fileName,
+            mimeType: mimeType,
+            parameters: parameters
+        )
+        
+        let (responseData, response) = try await session.data(for: req)
+        return (responseData, response)
+    }
+    
+    private func createMultipartBody(
+        data: Data,
+        boundary: String,
+        fileName: String,
+        mimeType: String,
+        parameters: [String: String]?
+    ) -> Data {
+        var body = Data()
+        let lineBreak = "\r\n"
+        
+        // Add Parameters
+        if let parameters = parameters {
+            for (key, value) in parameters {
+                body.append("--\(boundary + lineBreak)")
+                body.append("Content-Disposition: form-data; name=\"\(key)\"\(lineBreak + lineBreak)")
+                body.append("\(value + lineBreak)")
+            }
+        }
+        
+        // Add File
+        body.append("--\(boundary + lineBreak)")
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\(lineBreak)") // 'file' is crucial key for backend
+        body.append("Content-Type: \(mimeType + lineBreak + lineBreak)")
+        body.append(data)
+        body.append(lineBreak)
+        
+        // End Boundary
+        body.append("--\(boundary)--\(lineBreak)")
+        
+        return body
+    }
+}
+
+extension Data {
+    mutating func append(_ string: String) {
+        if let data = string.data(using: .utf8) {
+            append(data)
+        }
+    }
 }
