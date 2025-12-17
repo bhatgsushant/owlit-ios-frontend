@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import UIKit
 
 // MARK: - Scan Response
 struct ScanResponse: Codable {
@@ -25,7 +26,11 @@ struct ReceiptData: Codable, Identifiable, Equatable {
     
     // Merchant Selection Logic
     var selectedMerchantId: String?
+
     var canonicalMerchantId: String?
+    
+    // Transient - Not Decoded
+    var originalImage: UIImage? = nil
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -34,7 +39,7 @@ struct ReceiptData: Codable, Identifiable, Equatable {
         case totalAmount = "total_amount"
         case storeType = "store_type"
         case lineItems = "line_items"
-        case selectedMerchantId // JS uses same casing usually, need to check if snake_case
+        case selectedMerchantId = "selected_merchant_id"
         case canonicalMerchantId = "canonical_merchant_id"
     }
     

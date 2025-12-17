@@ -116,6 +116,7 @@ class APIClient {
         method: String = "POST",
         data: Data,
         fileName: String,
+        fieldName: String = "file",
         mimeType: String,
         parameters: [String: String]? = nil,
         token: String?
@@ -138,6 +139,7 @@ class APIClient {
             data: data,
             boundary: boundary,
             fileName: fileName,
+            fieldName: fieldName,
             mimeType: mimeType,
             parameters: parameters
         )
@@ -150,6 +152,7 @@ class APIClient {
         data: Data,
         boundary: String,
         fileName: String,
+        fieldName: String,
         mimeType: String,
         parameters: [String: String]?
     ) -> Data {
@@ -167,7 +170,7 @@ class APIClient {
         
         // Add File
         body.append("--\(boundary + lineBreak)")
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\(lineBreak)") // 'file' is crucial key for backend
+        body.append("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(fileName)\"\(lineBreak)") 
         body.append("Content-Type: \(mimeType + lineBreak + lineBreak)")
         body.append(data)
         body.append(lineBreak)

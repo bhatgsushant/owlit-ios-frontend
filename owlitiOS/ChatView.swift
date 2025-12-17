@@ -32,39 +32,6 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // MARK: - Header
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    // Back Button
-                    Button(action: {}) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 20, weight: .semibold))
-                        }
-                        .foregroundColor(.white)
-                    }
-                    .padding(.leading, 8)
-                    
-                    Spacer()
-                    
-                    // Profile Info
-                    // Text("Owlit AI") removed
-                    
-                    Spacer()
-                    
-                    Spacer()
-                    
-                    // Spacer for balance
-                    Color.clear.frame(width: 40, height: 40)
-                }
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-                
-                // Separator (Removed as requested)
-                // Divider().background(Color.white.opacity(0.2))
-            }
-            .background(headerBlack)
-            
             // MARK: - Chat Area
             ScrollViewReader { proxy in
                 ScrollView {
@@ -76,92 +43,8 @@ struct ChatView: View {
                             .padding(.top, 16)
                             .padding(.bottom, 8)
                         
-                        // Empty State
                         if messages.isEmpty {
-                            VStack(spacing: 24) {
-                                Spacer(minLength: 60)
-                                
-                                // Brand Mark Horizontal
-                                HStack(spacing: 16) {
-                                    OwlitLogo(size: 44)
-                                        .shadow(color: .white.opacity(0.1), radius: 10)
-                                    
-                                    // Vertical Divider
-                                    Rectangle()
-                                        .fill(Color.gray.opacity(0.5))
-                                        .frame(width: 1, height: 36)
-                                    
-                                    HStack(spacing: 0) {
-                                        Text("Hi ")
-                                            .font(.custom("FKGroteskTrial-Regular", size: 24))
-                                            .foregroundStyle(.white.opacity(0.9))
-                                        
-                                        Text((authManager.user?.bestDisplayName ?? "User") + " !")
-                                            .font(.custom("FKGroteskTrial-Medium", size: 20))
-                                            .foregroundStyle(Color.blue)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 2) // Just enough height
-                                            .background(Color.white)
-                                            .cornerRadius(6)
-                                    }
-                                }
-                                .padding(.bottom, 40) // Increased spacing
-                                
-                                // Recent Chats / Suggestions
-                                if !recentChats.isEmpty {
-                                    VStack(alignment: .leading, spacing: 12) {
-                                        Text("Recent")
-                                            .font(.custom("FKGroteskTrial-Regular", size: 14))
-                                            .foregroundStyle(.gray)
-                                            .padding(.horizontal, 4)
-                                        
-                                        ForEach(recentChats) { chat in
-                                            Button(action: { submitQuery(chat.title) }) {
-                                                HStack {
-                                                    Image(systemName: "clock")
-                                                        .font(.system(size: 14))
-                                                        .foregroundStyle(.gray)
-                                                    Text(chat.title)
-                                                        .font(.custom("FKGroteskTrial-Regular", size: 15))
-                                                        .foregroundStyle(.white.opacity(0.9))
-                                                        .lineLimit(1)
-                                                    Spacer()
-                                                    Image(systemName: "chevron.right")
-                                                        .font(.system(size: 12))
-                                                        .foregroundStyle(.gray.opacity(0.5))
-                                                }
-                                                .padding(16)
-                                                .background(Color(white: 0.1))
-                                                .cornerRadius(16)
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 16)
-                                                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                                                )
-                                            }
-                                        }
-                                    }
-                                    .padding(.horizontal, 32)
-                                } else {
-                                    // Fallback to suggestions if no history
-                                    FlowLayout(spacing: 8) {
-                                        ForEach(quickReplies, id: \.self) { reply in
-                                            Button(action: { submitQuery(reply) }) {
-                                                Text(reply)
-                                                    .font(.custom("FKGroteskTrial-Medium", size: 13))
-                                                    .foregroundStyle(.white.opacity(0.9))
-                                                    .padding(.vertical, 8)
-                                                    .padding(.horizontal, 16)
-                                                    .background(Color(white: 0.1))
-                                                    .overlay(
-                                                        RoundedRectangle(cornerRadius: 20)
-                                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                                    )
-                                            }
-                                        }
-                                    }
-                                    .padding(.horizontal, 32)
-                                }
-                            }
+                            welcomeView
                         }
                         
                         // Messages
@@ -173,6 +56,11 @@ struct ChatView: View {
                                 },
                                 onSuggestionTap: { suggestion in
                                     submitQuery(suggestion)
+                                },
+                                onEditReceipt: { data in
+                                    // Trigger the sheet with existing data
+                                    self.scannedData = data
+                                    self.selectedImage = data.originalImage // Might be nil, but View handles it
                                 }
                             )
                             .id(message.id)
@@ -209,7 +97,13 @@ struct ChatView: View {
             // For manual entry, we might not have a selectedImage, so we check data presence primary
             // But ScanReceiptView expects an image. We can use a dummy image or nil-handling logic.
             // For now, let's use a placeholder if selectedImage is nil.
-            ScanReceiptView(image: selectedImage ?? UIImage(), data: data) 
+            ScanReceiptView(image: selectedImage ?? UIImage(), data: data) { savedReceipt in
+                // On Success: Append receipt summary message
+                let summaryMsg = ChatMessage(content: "Receipt Saved", isUser: false, receiptData: savedReceipt)
+                withAnimation {
+                    messages.append(summaryMsg)
+                }
+            }
                 .environmentObject(authManager)
         }
         .onAppear { loadRecentChats() }
@@ -278,7 +172,7 @@ struct ChatView: View {
             "Reading line items...",
             "Calculating total amount...",
             "Categorizing products...",
-            "Checking for spending anomalies..."
+            "Checking for anomalies..."
         ]
         
         // Resize & Upload
@@ -302,7 +196,7 @@ struct ChatView: View {
                     await MainActor.run {
                         if let idx = messages.firstIndex(where: { $0.id == initialMsg.id }) {
                             var updatedMsg = messages[idx]
-                            messages[idx] = ChatMessage(id: initialMsg.id, content: nextInsight, isUser: updatedMsg.isUser, timestamp: updatedMsg.timestamp, items: updatedMsg.items, memoryId: updatedMsg.memoryId, suggestedQuestions: updatedMsg.suggestedQuestions, replyingToQuestion: updatedMsg.replyingToQuestion, image: updatedMsg.image, isScanning: true)
+                            messages[idx] = ChatMessage(id: initialMsg.id, content: nextInsight, isUser: updatedMsg.isUser, timestamp: updatedMsg.timestamp, items: updatedMsg.items, memoryId: updatedMsg.memoryId, suggestedQuestions: updatedMsg.suggestedQuestions, replyingToQuestion: updatedMsg.replyingToQuestion, receiptData: updatedMsg.receiptData, image: updatedMsg.image, isScanning: true)
                         }
                     }
                     index += 1
@@ -321,7 +215,7 @@ struct ChatView: View {
                     
                     if let idx = messages.firstIndex(where: { $0.id == initialMsg.id }) {
                         let old = messages[idx]
-                        messages[idx] = ChatMessage(id: initialMsg.id, content: "Receipt Scanned", isUser: old.isUser, timestamp: old.timestamp, items: old.items, memoryId: old.memoryId, suggestedQuestions: old.suggestedQuestions, replyingToQuestion: old.replyingToQuestion, image: old.image, isScanning: false)
+                        messages[idx] = ChatMessage(id: initialMsg.id, content: "Receipt Scanned", isUser: old.isUser, timestamp: old.timestamp, items: old.items, memoryId: old.memoryId, suggestedQuestions: old.suggestedQuestions, replyingToQuestion: old.replyingToQuestion, receiptData: old.receiptData, image: old.image, isScanning: false)
                     }
                     messages.append(ChatMessage(content: "Please review the details above.", isUser: false))
                 }
@@ -331,7 +225,7 @@ struct ChatView: View {
                     self.isProcessingImage = false
                      if let idx = messages.firstIndex(where: { $0.id == initialMsg.id }) {
                         let old = messages[idx]
-                        messages[idx] = ChatMessage(id: initialMsg.id, content: "Failed to scan", isUser: old.isUser, timestamp: old.timestamp, items: old.items, memoryId: old.memoryId, suggestedQuestions: old.suggestedQuestions, replyingToQuestion: old.replyingToQuestion, image: old.image, isScanning: false)
+                        messages[idx] = ChatMessage(id: initialMsg.id, content: "Failed to scan", isUser: old.isUser, timestamp: old.timestamp, items: old.items, memoryId: old.memoryId, suggestedQuestions: old.suggestedQuestions, replyingToQuestion: old.replyingToQuestion, receiptData: old.receiptData, image: old.image, isScanning: false)
                     }
                     messages.append(ChatMessage(content: "❌ Error: \(error.localizedDescription)", isUser: false))
                 }
@@ -437,6 +331,112 @@ struct ChatView: View {
     }
 }
 
+// MARK: - Extracted Subviews
+extension ChatView {
+    private var headerView: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Button(action: {}) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 20, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                }
+                .padding(.leading, 8)
+                Spacer()
+                Spacer()
+                Spacer()
+                Color.clear.frame(width: 40, height: 40)
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+        }
+        .background(headerBlack)
+    }
+    
+    private var welcomeView: some View {
+        VStack(spacing: 24) {
+            Spacer(minLength: 60)
+            HStack(spacing: 16) {
+                OwlitLogo(size: 44)
+                    .shadow(color: .white.opacity(0.1), radius: 10)
+                Rectangle()
+                    .fill(Color.gray.opacity(0.5))
+                    .frame(width: 1, height: 36)
+                HStack(spacing: 0) {
+                    Text("Hi ")
+                        .font(.custom("FKGroteskTrial-Regular", size: 24))
+                        .foregroundStyle(.white.opacity(0.9))
+                    Text((authManager.user?.bestDisplayName ?? "User") + " !")
+                        .font(.custom("FKGroteskTrial-Medium", size: 20))
+                        .foregroundStyle(Color.blue)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 2)
+                        .background(Color.white)
+                        .cornerRadius(6)
+                }
+            }
+            .padding(.bottom, 40)
+            
+            if !recentChats.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Recent")
+                        .font(.custom("FKGroteskTrial-Regular", size: 14))
+                        .foregroundStyle(.gray)
+                        .padding(.horizontal, 4)
+                    
+                    ForEach(recentChats) { chat in
+                        Button(action: { submitQuery(chat.title) }) {
+                            HStack {
+                                Image(systemName: "clock")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.gray)
+                                Text(chat.title)
+                                    .font(.custom("FKGroteskTrial-Regular", size: 15))
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .lineLimit(1)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.gray.opacity(0.5))
+                            }
+                            .padding(16)
+                            .background(Color(white: 0.1))
+                            .cornerRadius(16)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                            )
+                        }
+                    }
+                }
+                .padding(.horizontal, 32)
+            } else {
+                FlowLayout(spacing: 8) {
+                    ForEach(quickReplies, id: \.self) { reply in
+                        Button(action: { submitQuery(reply) }) {
+                            Text(reply)
+                                .font(.custom("FKGroteskTrial-Medium", size: 13))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 16)
+                                .background(Color(white: 0.1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                )
+                        }
+                    }
+                }
+                .padding(.horizontal, 32)
+            }
+        }
+    }
+
+
+}
+
 // MARK: - Isolated Input Bar View
 // This view manages its own state for sheets, preventing re-renders of the main list
 struct ChatInputBar: View {
@@ -460,12 +460,14 @@ struct ChatInputBar: View {
                     .accentColor(.white)
                 
                 // 2. Action Row (Below Text)
-                HStack(spacing: 16) {
+                HStack(spacing: 8) {
                     // Plus Icon (Attachment Mock)
                     Button(action: {}) {
                         Image(systemName: "plus")
                             .font(.system(size: 20, weight: .regular))
                             .foregroundColor(.gray)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     
                     // Camera Icon
@@ -473,6 +475,8 @@ struct ChatInputBar: View {
                         Image(systemName: "camera")
                             .font(.system(size: 18, weight: .regular))
                             .foregroundColor(.gray)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     
                     // Photo/Gallery Icon
@@ -480,14 +484,17 @@ struct ChatInputBar: View {
                         Image(systemName: "photo")
                             .font(.system(size: 18, weight: .regular))
                             .foregroundColor(.gray)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     
-                    // Manual Entry Pencil (NEW)
                     // Manual Entry Pencil
                     Button(action: { onManualTap() }) {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 20, weight: .regular))
                             .foregroundColor(.gray)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     
                     Spacer()
@@ -517,7 +524,7 @@ struct ChatInputBar: View {
         .background(Color.black)
         // Sheets attached here, isolated
         .sheet(isPresented: $showCamera) {
-            DocumentScanner { image in
+            CameraPicker { image in
                 onImageSelected(image)
             }
             .ignoresSafeArea()
@@ -536,6 +543,7 @@ struct MessageBubble: View {
     let message: ChatMessage
     var onFeedback: ((Bool) -> Void)? = nil
     var onSuggestionTap: ((String) -> Void)? = nil
+    var onEditReceipt: ((ReceiptData) -> Void)? = nil
     @State private var feedbackGiven: Bool? = nil // nil, true (good), false (bad)
     
     var body: some View {
@@ -578,6 +586,16 @@ struct MessageBubble: View {
                             .font(.custom("FKGroteskTrial-Regular", size: 17))
                             .foregroundColor(.white.opacity(0.9)) // White text
                             .fixedSize(horizontal: false, vertical: true) // Ensure multiline wraps
+                    }
+                    
+                    // Receipt Table
+                    if let receiptData = message.receiptData {
+                        ReceiptTableView(data: receiptData) {
+                            // Edit Action
+                            onEditReceipt?(receiptData)
+                        }
+                        .frame(width: 280)
+                        .padding(.top, 4)
                     }
                     
                     // Feedback Buttons (AI Only)
@@ -718,6 +736,7 @@ struct ChatMessage: Identifiable {
     var memoryId: String?
     var suggestedQuestions: [String]?
     var replyingToQuestion: String?
+    var receiptData: ReceiptData?
     
     // Receipt Scanning
     var image: UIImage?
@@ -731,6 +750,7 @@ struct ChatMessage: Identifiable {
          memoryId: String? = nil, 
          suggestedQuestions: [String]? = nil, 
          replyingToQuestion: String? = nil, 
+         receiptData: ReceiptData? = nil,
          image: UIImage? = nil, 
          isScanning: Bool = false) {
         self.id = id
@@ -741,6 +761,7 @@ struct ChatMessage: Identifiable {
         self.memoryId = memoryId
         self.suggestedQuestions = suggestedQuestions
         self.replyingToQuestion = replyingToQuestion
+        self.receiptData = receiptData
         self.image = image
         self.isScanning = isScanning
     }

@@ -14,6 +14,7 @@ struct ScanReceiptView: View {
     // Inputs
     let originalImage: UIImage
     @State var extractedData: ReceiptData
+    var onSaveSuccess: ((ReceiptData) -> Void)? // Callback
     
     // State
     @State private var isSaving = false
@@ -59,6 +60,12 @@ struct ScanReceiptView: View {
         _editedStoreType = State(initialValue: data.storeType ?? "restaurant") 
     }
     
+    // Convenience init for optional callback
+    init(image: UIImage, data: ReceiptData, onSaveSuccess: ((ReceiptData) -> Void)? = nil) {
+        self.init(image: image, data: data)
+        self.onSaveSuccess = onSaveSuccess
+    }
+    
     var body: some View {
         NavigationView {
             ZStack {
@@ -71,7 +78,11 @@ struct ScanReceiptView: View {
                     }
                     .padding(.vertical, 24)
                 }
+                .scrollDismissesKeyboard(.interactively) // Allow scrolling to dismiss
                 .background(mainBg)
+                .onTapGesture {
+                    hideKeyboard()
+                }
             }
             .navigationTitle("Refine Receipt")
             .navigationBarTitleDisplayMode(.inline)
@@ -101,12 +112,16 @@ struct ScanReceiptView: View {
             }
             .alert("Duplicate Receipt", isPresented: $showingDuplicateAlert) {
                 Button("Replace Old", role: .destructive) {
+                    print("🔄 User selected REPLACE")
                     saveReceipt(duplicateAction: "replace")
                 }
                 Button("Keep Both") {
+                    print("➕ User selected KEEP BOTH")
                     saveReceipt(duplicateAction: "keep")
                 }
-                Button("Cancel", role: .cancel) { }
+                Button("Cancel", role: .cancel) { 
+                    print("❌ User selected CANCEL DUPLICATE")
+                }
             } message: {
                 Text("This receipt seems to be a duplicate. Do you want to replace the existing one or keep both?")
             }
@@ -286,144 +301,27 @@ struct ScanReceiptView: View {
             // List
             VStack(spacing: 16) {
                 ForEach($extractedData.lineItems) { $item in
-                    itemRow(for: $item)
+                    ReceiptLineItemRow(
+                        item: $item,
+                        mainCategoryOptions: mainCategoryOptions,
+                        subCategoryOptionsMap: subCategoryOptionsMap,
+                        onDelete: {
+                            if let idx = extractedData.lineItems.firstIndex(where: { $0.id == item.id }) {
+                                extractedData.lineItems.remove(at: idx)
+                                recalculateTotal()
+                            }
+                        },
+                        onUpdateCategory: { item, main, sub in
+                            saveUserCategoryPreference(item: item, main: main, sub: sub)
+                        }
+                    )
                 }
             }
             .padding(.bottom, 100)
         }
     }
     
-    func itemRow(for item: Binding<LineItem>) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Item Name
-            TextField("Item Name", text: item.item)
-                .font(.custom("FKGroteskTrial-Regular", size: 14))
-                .foregroundColor(textWhite)
-                .padding(12)
-                .background(cardBg)
-                .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
-            
-            // Price & Qty Row
-            HStack(spacing: 12) {
-                // Price
-                HStack {
-                    Text("£")
-                        .font(.custom("BerkeleyMono-Regular", size: 14))
-                        .foregroundColor(textGray)
-                    TextField("0.00", value: item.price, format: .number.precision(.fractionLength(2)))
-                        .keyboardType(.decimalPad)
-                        .font(.custom("BerkeleyMono-Regular", size: 14))
-                        .foregroundColor(textWhite)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity)
-                .background(cardBg)
-                .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
-                
-                // Qty
-                TextField("1", value: item.quantity, format: .number)
-                    .keyboardType(.numberPad)
-                    .font(.custom("BerkeleyMono-Regular", size: 14))
-                    .foregroundColor(textWhite)
-                    .padding(12)
-                    .frame(maxWidth: .infinity)
-                    .background(cardBg)
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                    )
-            }
-            
-            // Categories (Pills)
-            VStack(spacing: 8) {
-                // Main Category
-                VStack(spacing: 0) {
-                    SearchablePicker(
-                        title: "Category",
-                        placeholder: "Category",
-                        selection: Binding(
-                            get: { item.wrappedValue.mainCategory ?? "" },
-                            set: { item.wrappedValue.mainCategory = $0 }
-                        ),
-                        options: mainCategoryOptions,
-                        allowCreate: true,
-                        displayIcon: { CategoryIconMapper.view(for: $0) },
-                        onCreate: { newCat in
-                            if !mainCategoryOptions.contains(newCat) {
-                                mainCategoryOptions.append(newCat)
-                            }
-                        }
-                    )
-                }
-                .padding(12)
-                .background(cardBg)
-                .cornerRadius(20)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
-                
-                // Sub Category
-                VStack(spacing: 0) {
-                    SearchablePicker(
-                        title: "Subcategory",
-                        placeholder: "Subcategory",
-                        selection: Binding(
-                            get: { item.wrappedValue.subCategory ?? "" },
-                            set: { 
-                                item.wrappedValue.subCategory = $0
-                                saveUserCategoryPreference(item: item.wrappedValue.item, main: item.wrappedValue.mainCategory, sub: $0)
-                            }
-                        ),
-                        options: getSubOptions(for: item.wrappedValue.mainCategory),
-                        allowCreate: true,
-                        displayIcon: { CategoryIconMapper.view(for: $0) },
-                        onCreate: { newSub in
-                           // Allow creation
-                        }
-                    )
-                }
-                .padding(12)
-                .background(cardBg)
-                .cornerRadius(20)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
-            }
-            
-            // Delete
-            Button(action: {
-                if let idx = extractedData.lineItems.firstIndex(where: { $0.id == item.wrappedValue.id }) {
-                    extractedData.lineItems.remove(at: idx)
-                    recalculateTotal()
-                }
-            }) {
-                Image(systemName: "trash")
-                    .font(.system(size: 14))
-                    .foregroundColor(Color.red.opacity(0.6))
-                    .padding(.top, 4)
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .padding(16)
-        .background(Color(hex: "0A0A0A")) // Inner card very dark
-        .cornerRadius(20)
-        .overlay(
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(Color.white.opacity(0.05), lineWidth: 1)
-        )
-        .padding(.horizontal, 16)
-    }
+
     
     // MARK: - Helper Properties
     var merchantNamesList: [String] {
@@ -554,6 +452,7 @@ struct ScanReceiptView: View {
         finalData.transactionDate = formatter.string(from: editedDate)
         finalData.totalAmount = editedTotal
         finalData.storeType = editedStoreType
+        finalData.originalImage = self.originalImage
         
         // 2. Encode Metadata
         guard let jsonData = try? JSONEncoder().encode(finalData),
@@ -575,10 +474,11 @@ struct ScanReceiptView: View {
         // 4. Send Request
         Task {
             do {
-                let (_, response) = try await APIClient.shared.uploadRequest(
+                let (responseData, response) = try await APIClient.shared.uploadRequest(
                     path: "/api/receipts",
                     data: imageData,
                     fileName: "receipt.jpg",
+                    fieldName: "receiptImage",
                     mimeType: "image/jpeg",
                     parameters: params,
                     token: token
@@ -587,17 +487,31 @@ struct ScanReceiptView: View {
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 || httpResponse.statusCode == 201 {
                         await MainActor.run {
+                            self.onSaveSuccess?(finalData)
                             isSaving = false
                             dismiss()
                         }
                     } else if httpResponse.statusCode == 409 {
-                        await MainActor.run {
-                            isSaving = false
-                            self.duplicateReceiptId = finalData.id // Fallback
-                            self.showingDuplicateAlert = true
+                        // Parse the response to get the existing receipt ID
+                        if let json = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
+                           let existingId = json["existingReceiptId"] as? String {
+                            await MainActor.run {
+                                print("⚠️ Duplicate detected. Existing ID: \(existingId)")
+                                isSaving = false
+                                self.duplicateReceiptId = existingId
+                                self.showingDuplicateAlert = true
+                            }
+                        } else {
+                            // Fallback if parsing fails
+                             await MainActor.run {
+                                isSaving = false
+                                self.showingDuplicateAlert = true
+                            }
                         }
                     } else {
-                        throw NSError(domain: "Network", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Server error \(httpResponse.statusCode)"])
+                        // Capture the error body
+                        let errorBody = String(data: responseData, encoding: .utf8) ?? "Unknown server error"
+                        throw NSError(domain: "Network", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Server Error \(httpResponse.statusCode): \(errorBody)"])
                     }
                 }
             } catch {
@@ -607,6 +521,170 @@ struct ScanReceiptView: View {
                     showingSaveError = true
                 }
             }
+            }
         }
     }
-}
+    
+    // MARK: - Utilities
+    func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+
+    
+    // MARK: - Isolated Row Component
+    struct ReceiptLineItemRow: View {
+        @Binding var item: LineItem
+        // Callbacks & Data
+        let mainCategoryOptions: [String]
+        let subCategoryOptionsMap: [String: [String]]
+        let onDelete: () -> Void
+        let onUpdateCategory: (String, String?, String) -> Void
+        
+        // Colors
+        let cardBg = Color(hex: "111111")
+        let textWhite = Color.white
+        let textGray = Color.gray
+        
+        // Focus State
+        enum Field: Hashable {
+            case name, price, quantity
+        }
+        @FocusState private var focusedField: Field?
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                // Item Name
+                TextField("Item Name", text: $item.item)
+                    .font(.custom("FKGroteskTrial-Regular", size: 14))
+                    .foregroundColor(textWhite)
+                    .focused($focusedField, equals: .name)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .price }
+                    .padding(12)
+                    .background(cardBg)
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                    )
+                
+                // Price & Qty Row
+                HStack(spacing: 12) {
+                    // Price
+                    HStack {
+                        Text("£")
+                            .font(.custom("BerkeleyMono-Regular", size: 14))
+                            .foregroundColor(textGray)
+                        TextField("0.00", value: $item.price, format: .number.precision(.fractionLength(2)))
+                            .keyboardType(.decimalPad)
+                            .focused($focusedField, equals: .price)
+                            .font(.custom("BerkeleyMono-Regular", size: 14))
+                            .foregroundColor(textWhite)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity)
+                    .background(cardBg)
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                    )
+                    
+                    // Qty
+                    TextField("1", value: $item.quantity, format: .number)
+                        .keyboardType(.numberPad)
+                        .focused($focusedField, equals: .quantity)
+                        .font(.custom("BerkeleyMono-Regular", size: 14))
+                        .foregroundColor(textWhite)
+                        .padding(12)
+                        .frame(maxWidth: .infinity)
+                        .background(cardBg)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                        )
+                }
+                
+                // Categories (Pills)
+                VStack(spacing: 8) {
+                    // Main Category
+                    VStack(spacing: 0) {
+                        SearchablePicker(
+                            title: "Category",
+                            placeholder: "Category",
+                            selection: Binding(
+                                get: { item.mainCategory ?? "" },
+                                set: { item.mainCategory = $0 }
+                            ),
+                            options: mainCategoryOptions,
+                            allowCreate: true,
+                            displayIcon: { CategoryIconMapper.view(for: $0) },
+                            onCreate: { _ in } // Handled by parent logic if needed or local append
+                        )
+                    }
+                    .padding(12)
+                    .background(cardBg)
+                    .cornerRadius(20)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                    )
+                    .onTapGesture { focusedField = nil }
+                    
+                    // Sub Category
+                    VStack(spacing: 0) {
+                        SearchablePicker(
+                            title: "Subcategory",
+                            placeholder: "Subcategory",
+                            selection: Binding(
+                                get: { item.subCategory ?? "" },
+                                set: { 
+                                    item.subCategory = $0
+                                    onUpdateCategory(item.item, item.mainCategory, $0)
+                                }
+                            ),
+                            options: getSubOptions(for: item.mainCategory),
+                            allowCreate: true,
+                            displayIcon: { CategoryIconMapper.view(for: $0) },
+                            onCreate: { _ in }
+                        )
+                    }
+                    .padding(12)
+                    .background(cardBg)
+                    .cornerRadius(20)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                    )
+                    .onTapGesture { focusedField = nil }
+                }
+                
+                // Delete
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14))
+                        .foregroundColor(Color.red.opacity(0.6))
+                        .padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .padding(16)
+            .background(Color(hex: "0A0A0A")) // Inner card very dark
+            .cornerRadius(20)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
+            )
+            .padding(.horizontal, 16)
+        }
+        
+        func getSubOptions(for main: String?) -> [String] {
+            guard let main = main, !main.isEmpty else { return [] }
+            let key = main.lowercased()
+            if let subs = subCategoryOptionsMap[main] { return subs }
+            if let subs = subCategoryOptionsMap[key] { return subs }
+            return []
+        }
+    }
