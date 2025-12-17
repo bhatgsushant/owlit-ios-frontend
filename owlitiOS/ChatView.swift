@@ -9,25 +9,20 @@ import SwiftUI
 
 struct ChatView: View {
     @EnvironmentObject var authManager: AuthManager
-    @State private var prompt: String = ""
     @State private var messages: [ChatMessage] = []
     @State private var isLoading: Bool = false
     
-    // Image Picker State
-    @State private var showImagePicker = false
-    @State private var pickerSourceType: UIImagePickerController.SourceType = .photoLibrary
-    @State private var selectedImage: UIImage?
-    
-    // Receipt Scanning State
+    // Receipt Scanning State (Maintained at top level to handle the result)
     @State private var scannedData: ReceiptData?
     @State private var isProcessingImage = false
+    @State private var selectedImage: UIImage?
+    @State private var isManualEntry = false
     
     // Custom Colors
     let pitchBlack = Color.black
     let headerBlack = Color.black.opacity(0.95)
-    let bubbleGray = Color(white: 0.15) // for user bubbles or input background
     
-    // Quick Replies (Matching AskAIPage.jsx suggestions)
+    // Quick Replies
     let quickReplies = [
         "Spend Summary",
         "Recent Grocery",
@@ -53,9 +48,9 @@ struct ChatView: View {
                     Spacer()
                     
                     // Profile Info
-                    Text("Owlit AI")
-                        .font(.system(size: 18, weight: .semibold, design: .serif))
-                        .foregroundStyle(.white)
+                    // Text("Owlit AI") removed
+                    
+                    Spacer()
                     
                     Spacer()
                     
@@ -65,8 +60,8 @@ struct ChatView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 8)
                 
-                // Separator
-                Divider().background(Color.white.opacity(0.2))
+                // Separator (Removed as requested)
+                // Divider().background(Color.white.opacity(0.2))
             }
             .background(headerBlack)
             
@@ -83,31 +78,89 @@ struct ChatView: View {
                         
                         // Empty State
                         if messages.isEmpty {
-                            VStack(spacing: 16) {
-                                Spacer(minLength: 50)
-                                Text("Where knowledge begins") 
-                                    .font(.custom("FKGroteskTrial-Medium", size: 24))
-                                    .foregroundStyle(.white.opacity(0.9))
+                            VStack(spacing: 24) {
+                                Spacer(minLength: 60)
                                 
-                                // Internal Quick Replies
-                                FlowLayout(spacing: 8) {
-                                    ForEach(quickReplies, id: \.self) { reply in
-                                        Button(action: { submitQuery(reply) }) {
-                                            Text(reply)
-                                                .font(.custom("FKGroteskTrial-Medium", size: 13))
-                                                .foregroundStyle(.white.opacity(0.9))
-                                                .padding(.vertical, 8)
-                                                .padding(.horizontal, 16)
-                                                .background(Color(white: 0.1))
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 20)
-                                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                                )
-                                                .clipShape(Capsule())
-                                        }
+                                // Brand Mark Horizontal
+                                HStack(spacing: 16) {
+                                    OwlitLogo(size: 44)
+                                        .shadow(color: .white.opacity(0.1), radius: 10)
+                                    
+                                    // Vertical Divider
+                                    Rectangle()
+                                        .fill(Color.gray.opacity(0.5))
+                                        .frame(width: 1, height: 36)
+                                    
+                                    HStack(spacing: 0) {
+                                        Text("Hi ")
+                                            .font(.custom("FKGroteskTrial-Regular", size: 24))
+                                            .foregroundStyle(.white.opacity(0.9))
+                                        
+                                        Text((authManager.user?.bestDisplayName ?? "User") + " !")
+                                            .font(.custom("FKGroteskTrial-Medium", size: 20))
+                                            .foregroundStyle(Color.blue)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 2) // Just enough height
+                                            .background(Color.white)
+                                            .cornerRadius(6)
                                     }
                                 }
-                                .padding(.horizontal, 24)
+                                .padding(.bottom, 40) // Increased spacing
+                                
+                                // Recent Chats / Suggestions
+                                if !recentChats.isEmpty {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        Text("Recent")
+                                            .font(.custom("FKGroteskTrial-Regular", size: 14))
+                                            .foregroundStyle(.gray)
+                                            .padding(.horizontal, 4)
+                                        
+                                        ForEach(recentChats) { chat in
+                                            Button(action: { submitQuery(chat.title) }) {
+                                                HStack {
+                                                    Image(systemName: "clock")
+                                                        .font(.system(size: 14))
+                                                        .foregroundStyle(.gray)
+                                                    Text(chat.title)
+                                                        .font(.custom("FKGroteskTrial-Regular", size: 15))
+                                                        .foregroundStyle(.white.opacity(0.9))
+                                                        .lineLimit(1)
+                                                    Spacer()
+                                                    Image(systemName: "chevron.right")
+                                                        .font(.system(size: 12))
+                                                        .foregroundStyle(.gray.opacity(0.5))
+                                                }
+                                                .padding(16)
+                                                .background(Color(white: 0.1))
+                                                .cornerRadius(16)
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 16)
+                                                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    .padding(.horizontal, 32)
+                                } else {
+                                    // Fallback to suggestions if no history
+                                    FlowLayout(spacing: 8) {
+                                        ForEach(quickReplies, id: \.self) { reply in
+                                            Button(action: { submitQuery(reply) }) {
+                                                Text(reply)
+                                                    .font(.custom("FKGroteskTrial-Medium", size: 13))
+                                                    .foregroundStyle(.white.opacity(0.9))
+                                                    .padding(.vertical, 8)
+                                                    .padding(.horizontal, 16)
+                                                    .background(Color(white: 0.1))
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 20)
+                                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                                    )
+                                            }
+                                        }
+                                    }
+                                    .padding(.horizontal, 32)
+                                }
                             }
                         }
                         
@@ -142,103 +195,84 @@ struct ChatView: View {
                 }
             }
             
-            // MARK: - Input Area (Perplexity Style)
-            VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 12) {
-                    // 1. Text Field Area
-                    TextField("Ask anything...", text: $prompt)
-                        .font(.custom("FKGroteskTrial-Medium", size: 18))
-                        .padding(.horizontal, 4)
-                        .padding(.top, 4)
-                        .foregroundColor(.white)
-                        .accentColor(.white)
-                    
-                    // 2. Action Row (Below Text)
-                    HStack(spacing: 16) {
-                        // Plus Icon (Attachment Mock)
-                        Button(action: {}) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 20, weight: .regular))
-                                .foregroundColor(.gray)
-                        }
-                        
-                        // Camera Icon
-                        Button(action: {
-                            pickerSourceType = .camera
-                            showImagePicker = true
-                        }) {
-                            Image(systemName: "camera")
-                                .font(.system(size: 18, weight: .regular))
-                                .foregroundColor(.gray)
-                        }
-                        
-                        // NEW: Photo/Gallery Icon
-                        Button(action: {
-                            pickerSourceType = .photoLibrary
-                            showImagePicker = true
-                        }) {
-                            Image(systemName: "photo")
-                                .font(.system(size: 18, weight: .regular))
-                                .foregroundColor(.gray)
-                        }
-                        
-                        Spacer()
-                        
-                        // Send Button
-                        Button(action: { submitQuery(prompt) }) {
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.black)
-                                .frame(width: 32, height: 32)
-                                .background(prompt.isEmpty ? Color.gray.opacity(0.3) : Color.white)
-                                .clipShape(Circle())
-                        }
-                        .disabled(prompt.isEmpty)
-                    }
-                }
-                .padding(16)
-                .background(Color(white: 0.12)) // Dark gray input bg
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .shadow(color: Color.black.opacity(0.3), radius: 15, x: 0, y: 5)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
-            }
-            .background(pitchBlack)
+            // MARK: - Input Area (Isolated Subview)
+            ChatInputBar(
+                onSubmit: { query in submitQuery(query) },
+                onImageSelected: { image in handleImageSelection(image) },
+                onManualTap: { activateManualMode() }
+            )
         }
         .background(pitchBlack)
         .preferredColorScheme(.dark)
-        .sheet(isPresented: $showImagePicker) {
-            ImagePicker(sourceType: pickerSourceType) { image in
-                handleImageSelection(image)
+        // Sheet for Receipt Review is top level logic
+        .sheet(item: $scannedData) { data in
+            // For manual entry, we might not have a selectedImage, so we check data presence primary
+            // But ScanReceiptView expects an image. We can use a dummy image or nil-handling logic.
+            // For now, let's use a placeholder if selectedImage is nil.
+            ScanReceiptView(image: selectedImage ?? UIImage(), data: data) 
+                .environmentObject(authManager)
+        }
+        .onAppear { loadRecentChats() }
+    }
+    
+    // Recent Chats State
+    @State private var recentChats: [RecentChat] = []
+    
+    // MARK: - Logic & Handlers
+    
+    func loadRecentChats() {
+        print("🚀 ChatView.onAppear triggered. Checking Auth...")
+        if let user = authManager.user {
+            print("✅ AuthManager has User: \(user.displayName ?? "No Name")")
+        } else {
+            print("⚠️ AuthManager User is NIL")
+        }
+        
+        guard let token = authManager.token else { 
+            print("❌ No Token in AuthManager")
+            return 
+        }
+        
+        Task {
+            // Attempt to fetch recent chats. Endpoint assumption: /api/chats
+            // If backend doesn't exist yet, this will fail silently and list will be empty
+            do {
+                print("⏳ Fetching recent chats...")
+                let start = Date()
+                let (data, _) = try await APIClient.shared.rawRequest(path: "/api/chats", token: token)
+                let duration = Date().timeIntervalSince(start)
+                print("✅ Fetched chats in \(String(format: "%.2f", duration))s")
+                
+                let chats = try JSONDecoder().decode([RecentChat].self, from: data)
+                await MainActor.run {
+                    self.recentChats = Array(chats.prefix(5)) // Show top 5
+                }
+            } catch {
+                print("⚠️ Failed to load chats: \(error)")
+                // Fallback to quick replies if fetch fails? Or just empty.
             }
         }
-        .sheet(item: $scannedData) { data in
-            if let img = selectedImage {
-                ScanReceiptView(image: img, data: data)
-                    .environmentObject(authManager)
-            }
+    }
+    
+    // ... rest of logic
+    
+    func activateManualMode() {
+        isManualEntry = true
+        let msg = ChatMessage(content: "Please enter transaction details:\n\nFormat: Qty Item Merchant Price\nExample: 3 Bananas Tesco 1.50", isUser: false)
+        withAnimation {
+            messages.append(msg)
         }
     }
     
     func handleImageSelection(_ image: UIImage) {
         selectedImage = image
         isProcessingImage = true
+        isManualEntry = false // Reset manual mode if image picked
         
-        // Show in chat immediately with image and initial status
         let msgId = UUID()
-        let initialMsg = ChatMessage(
-            content: "Analyzing receipt...", 
-            isUser: true, 
-            image: image,
-            isScanning: true
-        )
-        // We need to manually set ID to track updates, but ChatMessage.id is let.
-        // We'll rely on finding the message by its content/image reference or just index for now,
-        // but better to rebuild the list or use a class. For SwiftUI Structs, we replace the item.
-        // Let's rely on the fact we just appended it.
+        let initialMsg = ChatMessage(content: "Analyzing receipt...", isUser: true, image: image, isScanning: true)
         messages.append(initialMsg)
         
-        // Rotating insights
         let insights = [
             "Detecting merchant details...",
             "Reading line items...",
@@ -247,44 +281,28 @@ struct ChatView: View {
             "Checking for spending anomalies..."
         ]
         
-        // Perform Upload
+        // Resize & Upload
+        let resizedImage = image.resized(toMaxDimension: 1200)
+        
         guard let token = authManager.token,
-              let imageData = image.jpegData(compressionQuality: 0.6) else {
+              let imageData = resizedImage.jpegData(compressionQuality: 0.6) else {
             isProcessingImage = false
             return
         }
         
         Task {
-            // Start the insight rotation in a separate sub-task or just track it
-            // Since `uploadRequest` awaits, we need a parallel timer.
-            let startTime = Date()
+            // Rotating Insights Simulation
             var isFinished = false
-            
-            // Insight Rotation Task
-            Task {
+             Task {
                 var index = 0
                 while !isFinished {
-                    try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                    try? await Task.sleep(nanoseconds: 2_500_000_000)
                     if isFinished { break }
-                    
                     let nextInsight = insights[index % insights.count]
                     await MainActor.run {
-                        // Find by ID - this should now be stable if we preserve ID
                         if let idx = messages.firstIndex(where: { $0.id == initialMsg.id }) {
                             var updatedMsg = messages[idx]
-                            // Create new struct with updated content AND SAME ID
-                            messages[idx] = ChatMessage(
-                                id: initialMsg.id, // IMPN: Keep same ID
-                                content: nextInsight,
-                                isUser: updatedMsg.isUser,
-                                timestamp: updatedMsg.timestamp,
-                                items: updatedMsg.items,
-                                memoryId: updatedMsg.memoryId,
-                                suggestedQuestions: updatedMsg.suggestedQuestions,
-                                replyingToQuestion: updatedMsg.replyingToQuestion,
-                                image: updatedMsg.image,
-                                isScanning: true
-                            )
+                            messages[idx] = ChatMessage(id: initialMsg.id, content: nextInsight, isUser: updatedMsg.isUser, timestamp: updatedMsg.timestamp, items: updatedMsg.items, memoryId: updatedMsg.memoryId, suggestedQuestions: updatedMsg.suggestedQuestions, replyingToQuestion: updatedMsg.replyingToQuestion, image: updatedMsg.image, isScanning: true)
                         }
                     }
                     index += 1
@@ -292,20 +310,8 @@ struct ChatView: View {
             }
             
             do {
-                // Determine scan mode (default receipt)
                 let params = ["scanMode": "receipt", "highAccuracy": "false"]
-                
-                let (data, _) = try await APIClient.shared.uploadRequest(
-                    path: "/api/scan",
-                    data: imageData,
-                    fileName: "upload.jpg",
-                    mimeType: "image/jpeg",
-                    parameters: params,
-                    token: token
-                )
-                
-                // Decode Receipt Data
-                // The API returns the JSON directly
+                let (data, _) = try await APIClient.shared.uploadRequest(path: "/api/scan", data: imageData, fileName: "upload.jpg", mimeType: "image/jpeg", parameters: params, token: token)
                 let receipt = try JSONDecoder().decode(ReceiptData.self, from: data)
                 
                 await MainActor.run {
@@ -313,87 +319,32 @@ struct ChatView: View {
                     self.scannedData = receipt
                     self.isProcessingImage = false
                     
-                    // Update the chat message to indicate success
                     if let idx = messages.firstIndex(where: { $0.id == initialMsg.id }) {
                         let old = messages[idx]
-                        messages[idx] = ChatMessage(
-                            id: initialMsg.id, // Keep ID
-                            content: "Receipt Scanned",
-                            isUser: old.isUser,
-                            timestamp: old.timestamp,
-                            items: old.items,
-                            memoryId: old.memoryId,
-                            suggestedQuestions: old.suggestedQuestions,
-                            replyingToQuestion: old.replyingToQuestion,
-                            image: old.image,
-                            isScanning: false
-                        )
+                        messages[idx] = ChatMessage(id: initialMsg.id, content: "Receipt Scanned", isUser: old.isUser, timestamp: old.timestamp, items: old.items, memoryId: old.memoryId, suggestedQuestions: old.suggestedQuestions, replyingToQuestion: old.replyingToQuestion, image: old.image, isScanning: false)
                     }
                     messages.append(ChatMessage(content: "Please review the details above.", isUser: false))
                 }
             } catch {
-                print("Scan Error: \(error)")
                 await MainActor.run {
                     isFinished = true
                     self.isProcessingImage = false
-                    
-                    if let idx = messages.firstIndex(where: { $0.id == initialMsg.id }) {
+                     if let idx = messages.firstIndex(where: { $0.id == initialMsg.id }) {
                         let old = messages[idx]
-                         messages[idx] = ChatMessage(
-                            id: initialMsg.id, // Keep ID
-                            content: "Failed to scan receipt",
-                            isUser: old.isUser,
-                            timestamp: old.timestamp,
-                            items: old.items,
-                            memoryId: old.memoryId,
-                            suggestedQuestions: old.suggestedQuestions,
-                            replyingToQuestion: old.replyingToQuestion,
-                            image: old.image,
-                            isScanning: false
-                        )
+                        messages[idx] = ChatMessage(id: initialMsg.id, content: "Failed to scan", isUser: old.isUser, timestamp: old.timestamp, items: old.items, memoryId: old.memoryId, suggestedQuestions: old.suggestedQuestions, replyingToQuestion: old.replyingToQuestion, image: old.image, isScanning: false)
                     }
-                    
                     messages.append(ChatMessage(content: "❌ Error: \(error.localizedDescription)", isUser: false))
                 }
             }
-        }
-    }
-
-    
-    // MARK: - Quick Replies View (No longer used in body)
-    private var quickRepliesView: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(quickReplies, id: \.self) { reply in
-                    Button(action: { submitQuery(reply) }) {
-                        Text(reply)
-                            .font(.custom("AvenirNext-Medium", size: 14))
-                            .foregroundStyle(.blue)
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 12)
-                            .background(Color.white)
-                            .clipShape(Capsule())
-                            .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
         }
     }
     
     private var typingIndicator: some View {
         HStack(spacing: 3) {
             ForEach(0..<3) { i in
-                Circle()
-                    .fill(Color.gray.opacity(0.4))
-                    .frame(width: 6, height: 6)
+                Circle().fill(Color.gray.opacity(0.4)).frame(width: 6, height: 6)
                     .scaleEffect(isLoading ? 1.0 : 0.6)
-                    .animation(
-                        .easeInOut(duration: 0.6)
-                        .repeatForever()
-                        .delay(Double(i) * 0.2),
-                        value: isLoading
-                    )
+                    .animation(.easeInOut(duration: 0.6).repeatForever().delay(Double(i) * 0.2), value: isLoading)
             }
         }
         .padding(12)
@@ -402,15 +353,6 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     
-    // MARK: - Actions
-    private func resetChat() {
-        withAnimation {
-            messages.removeAll()
-            prompt = ""
-        }
-    }
-    
-    // MARK: - API Call
     private func submitQuery(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -418,94 +360,73 @@ struct ChatView: View {
         let userMsg = ChatMessage(content: trimmed, isUser: true)
         withAnimation {
             messages.append(userMsg)
-            prompt = ""
             isLoading = true
+        }
+        
+        // CHECK MANUAL MODE
+        if isManualEntry {
+             processManualTransaction(trimmed)
+             return
         }
         
         Task {
             do {
-                // 1. Prepare Request
-                // Build history from existing messages (excluding the one we just added and any error messages)
                 let history = messages.dropLast().compactMap { msg -> [String: String]? in
-                    // Only include valid user/ai messages
                     return ["role": msg.isUser ? "user" : "ai", "text": msg.content]
                 }
                 
-                let body: [String: Any] = [
-                    "question": trimmed,
-                    "history": history
-                ]
+                let body: [String: Any] = ["question": trimmed, "history": history]
                 let bodyData = try JSONSerialization.data(withJSONObject: body)
                 
-                // 2. Fetch from API
-                let (data, response) = try await APIClient.shared.rawRequest(
-                    path: "/api/ask-ai",
-                    method: "POST",
-                    body: bodyData,
-                    token: authManager.token
-                )
-                
-                guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-                    throw NSError(domain: "ChatError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to get response"])
-                }
-                
-                // 3. Decode
+                let (data, _) = try await APIClient.shared.rawRequest(path: "/api/ask-ai", method: "POST", body: bodyData, token: authManager.token)
                 let aiResponse = try JSONDecoder().decode(AskAIResponse.self, from: data)
                 
-                // 4. Update UI
                 await MainActor.run {
                     withAnimation {
                         isLoading = false
-                        let aiMsg = ChatMessage(
-                            content: aiResponse.answer,
-                            isUser: false,
-                            items: aiResponse.itemsUsed,
-                            memoryId: aiResponse.memoryId,
-                            suggestedQuestions: aiResponse.suggestedQuestions
-                        )
-                        messages.append(aiMsg)
+                        messages.append(ChatMessage(content: aiResponse.answer, isUser: false, items: aiResponse.itemsUsed, memoryId: aiResponse.memoryId, suggestedQuestions: aiResponse.suggestedQuestions))
                     }
                 }
             } catch {
-                print("Ask AI Error: \(error)")
                 await MainActor.run {
                     withAnimation {
                         isLoading = false
-                        let errorMsg = ChatMessage(content: "Sorry, something went wrong. Please try again.", isUser: false)
-                        messages.append(errorMsg)
+                        messages.append(ChatMessage(content: "Sorry, something went wrong.", isUser: false))
                     }
                 }
             }
         }
     }
     
+    // MARK: - Manual Processing
+    private func processManualTransaction(_ text: String) {
+        // We reuse the existing Scan pipeline by converting text to an image.
+        // This ensures the backend (AI) handles categorization consistency.
+        
+        guard let textImage = UIImage.from(text: text) else {
+            // Fallback if image creation fails (rare)
+            Task {
+                await MainActor.run {
+                     messages.append(ChatMessage(content: "❌ Failed to process text.", isUser: false))
+                }
+            }
+            return
+        }
+        
+        // Exit manual mode and trigger the standard flow
+        isManualEntry = false
+        handleImageSelection(textImage)
+    }
+    
+
+    
     private func sendFeedback(message: ChatMessage, isPositive: Bool) {
         guard let memoryId = message.memoryId else { return }
-        
         let feedbackType = isPositive ? "good" : "bad"
-        // Toggle UI state locally if needed, but for now we'll just fire the request
-        
         Task {
-            do {
-                let feedbackBody: [String: Any] = [
-                    "question": message.replyingToQuestion ?? "", // We need to track the question this answered
-                    "answer": message.content,
-                    "feedback": feedbackType,
-                    "memory_id": memoryId
-                ]
-                
-                let bodyData = try JSONSerialization.data(withJSONObject: feedbackBody)
-                
-                _ = try await APIClient.shared.rawRequest(
-                    path: "/api/feedback",
-                    method: "POST",
-                    body: bodyData,
-                    token: authManager.token
-                )
-                print("Feedback sent: \(feedbackType)")
-            } catch {
-                print("Failed to send feedback: \(error)")
-            }
+            let feedbackBody: [String: Any] = ["question": message.replyingToQuestion ?? "", "answer": message.content, "feedback": feedbackType, "memory_id": memoryId]
+            let bodyData = try JSONSerialization.data(withJSONObject: feedbackBody)
+            _ = try? await APIClient.shared.rawRequest(path: "/api/feedback", method: "POST", body: bodyData, token: authManager.token)
         }
     }
     
@@ -513,6 +434,100 @@ struct ChatView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
         return formatter.string(from: Date())
+    }
+}
+
+// MARK: - Isolated Input Bar View
+// This view manages its own state for sheets, preventing re-renders of the main list
+struct ChatInputBar: View {
+    var onSubmit: (String) -> Void
+    var onImageSelected: (UIImage) -> Void
+    var onManualTap: () -> Void
+    
+    @State private var prompt: String = ""
+    @State private var showCamera = false
+    @State private var showPhotoLibrary = false
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                // 1. Text Field Area
+                TextField("Ask anything...", text: $prompt)
+                    .font(.custom("FKGroteskTrial-Medium", size: 18))
+                    .padding(.horizontal, 4)
+                    .padding(.top, 4)
+                    .foregroundColor(.white)
+                    .accentColor(.white)
+                
+                // 2. Action Row (Below Text)
+                HStack(spacing: 16) {
+                    // Plus Icon (Attachment Mock)
+                    Button(action: {}) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    // Camera Icon
+                    Button(action: { showCamera = true }) {
+                        Image(systemName: "camera")
+                            .font(.system(size: 18, weight: .regular))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    // Photo/Gallery Icon
+                    Button(action: { showPhotoLibrary = true }) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 18, weight: .regular))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    // Manual Entry Pencil (NEW)
+                    // Manual Entry Pencil
+                    Button(action: { onManualTap() }) {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    Spacer()
+                    
+                    // Send Button
+                    Button(action: { 
+                        onSubmit(prompt)
+                        prompt = ""
+                    }) {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.black)
+                            .frame(width: 32, height: 32)
+                            .background(prompt.isEmpty ? Color.gray.opacity(0.3) : Color.white)
+                            .clipShape(Circle())
+                    }
+                    .disabled(prompt.isEmpty)
+                }
+            }
+            .padding(16)
+            .background(Color(white: 0.12)) // Dark gray input bg
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: Color.black.opacity(0.3), radius: 15, x: 0, y: 5)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+        }
+        .background(Color.black)
+        // Sheets attached here, isolated
+        .sheet(isPresented: $showCamera) {
+            DocumentScanner { image in
+                onImageSelected(image)
+            }
+            .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showPhotoLibrary) {
+            PhotoPicker { image in
+                onImageSelected(image)
+            }
+            .ignoresSafeArea()
+        }
     }
 }
 
@@ -560,7 +575,7 @@ struct MessageBubble: View {
                     // Text Content (Only if not scanning or if no image exist, or if we want to show text below image when finished)
                     if message.image == nil || !message.isScanning {
                         Text(message.content)
-                            .font(.custom("FKGroteskTrial-Regular", size: 15))
+                            .font(.custom("FKGroteskTrial-Regular", size: 17))
                             .foregroundColor(.white.opacity(0.9)) // White text
                             .fixedSize(horizontal: false, vertical: true) // Ensure multiline wraps
                     }
@@ -758,6 +773,12 @@ struct SourceItem: Codable, Identifiable {
         case date
         case merchantName = "merchant_name"
     }
+}
+
+struct RecentChat: Codable, Identifiable {
+    let id: String
+    let title: String
+    let created_at: String?
 }
 
 #Preview {

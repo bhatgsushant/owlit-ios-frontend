@@ -221,7 +221,7 @@ struct ScanReceiptView: View {
                 .cornerRadius(16)
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(accentGreen, lineWidth: 1)
+                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
                 )
             }
             
@@ -346,11 +346,7 @@ struct ScanReceiptView: View {
             // Categories (Pills)
             VStack(spacing: 8) {
                 // Main Category
-                HStack {
-                    Image(systemName: "fork.knife") // Placeholder icon
-                        .font(.system(size: 12))
-                        .foregroundColor(Color.orange)
-                    
+                VStack(spacing: 0) {
                     SearchablePicker(
                         title: "Category",
                         placeholder: "Category",
@@ -360,6 +356,7 @@ struct ScanReceiptView: View {
                         ),
                         options: mainCategoryOptions,
                         allowCreate: true,
+                        displayIcon: { CategoryIconMapper.view(for: $0) },
                         onCreate: { newCat in
                             if !mainCategoryOptions.contains(newCat) {
                                 mainCategoryOptions.append(newCat)
@@ -376,11 +373,7 @@ struct ScanReceiptView: View {
                 )
                 
                 // Sub Category
-                HStack {
-                    Image(systemName: "fork.knife") // Placeholder icon
-                        .font(.system(size: 12))
-                        .foregroundColor(Color.orange)
-                    
+                VStack(spacing: 0) {
                     SearchablePicker(
                         title: "Subcategory",
                         placeholder: "Subcategory",
@@ -393,6 +386,7 @@ struct ScanReceiptView: View {
                         ),
                         options: getSubOptions(for: item.wrappedValue.mainCategory),
                         allowCreate: true,
+                        displayIcon: { CategoryIconMapper.view(for: $0) },
                         onCreate: { newSub in
                            // Allow creation
                         }

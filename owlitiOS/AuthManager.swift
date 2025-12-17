@@ -124,6 +124,10 @@ class AuthManager: ObservableObject {
                 throw NSError(domain: "APIError", code: statusCode, userInfo: [NSLocalizedDescriptionKey: "Failed to fetch user profile. Status: \(statusCode)"])
             }
             
+            if let jsonStr = String(data: responseData, encoding: .utf8) {
+                print("📥 Raw User JSON: \(jsonStr)")
+            }
+            
             let fetchedUser = try JSONDecoder().decode(User.self, from: responseData)
             self.user = fetchedUser
             self.isAuthenticated = true
