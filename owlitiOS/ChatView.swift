@@ -17,6 +17,7 @@ struct ChatView: View {
     @State private var isProcessingImage = false
     @State private var selectedImage: UIImage?
     @State private var isManualEntry = false
+    @State private var editingMessageId: UUID? // Generic ID for message being edited
     
     // Custom Colors
     let pitchBlack = Color.black
@@ -32,6 +33,9 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // MARK: - Header
+            headerView
+            
             // MARK: - Chat Area
             ScrollViewReader { proxy in
                 ScrollView {
@@ -61,6 +65,7 @@ struct ChatView: View {
                                     // Trigger the sheet with existing data
                                     self.scannedData = data
                                     self.selectedImage = data.originalImage // Might be nil, but View handles it
+                                    self.editingMessageId = message.id
                                 }
                             )
                             .id(message.id)
@@ -98,10 +103,29 @@ struct ChatView: View {
             // But ScanReceiptView expects an image. We can use a dummy image or nil-handling logic.
             // For now, let's use a placeholder if selectedImage is nil.
             ScanReceiptView(image: selectedImage ?? UIImage(), data: data) { savedReceipt in
-                // On Success: Append receipt summary message
-                let summaryMsg = ChatMessage(content: "Receipt Saved", isUser: false, receiptData: savedReceipt)
-                withAnimation {
-                    messages.append(summaryMsg)
+                // On Success: Update the existing message if we know which one
+                if let editingId = editingMessageId,
+                   let index = messages.firstIndex(where: { $0.id == editingId }) {
+                    
+                    // Update In-Place
+                    var updatedMsg = messages[index]
+                    updatedMsg.receiptData = savedReceipt
+                    // Also update content to "Receipt Saved" if it was "Receipt Scanned" or similar? 
+                    // User might prefer "Receipt Saved" status.
+                    // But typically we just update the data. 
+                    // Let's keep content as is or set to "Receipt Saved"
+                    // updatedMsg.content = "Receipt Saved" 
+                    
+                    withAnimation {
+                         messages[index] = updatedMsg
+                    }
+                    self.editingMessageId = nil
+                } else {
+                    // Fallback (Should not happen in new flow)
+                    let summaryMsg = ChatMessage(content: "Receipt Saved", isUser: false, receiptData: savedReceipt)
+                    withAnimation {
+                        messages.append(summaryMsg)
+                    }
                 }
             }
                 .environmentObject(authManager)
@@ -210,14 +234,28 @@ struct ChatView: View {
                 
                 await MainActor.run {
                     isFinished = true
-                    self.scannedData = receipt
                     self.isProcessingImage = false
+                    
+                    var receipt = receipt
+                    receipt.originalImage = resizedImage // Persist image in transient property
                     
                     if let idx = messages.firstIndex(where: { $0.id == initialMsg.id }) {
                         let old = messages[idx]
-                        messages[idx] = ChatMessage(id: initialMsg.id, content: "Receipt Scanned", isUser: old.isUser, timestamp: old.timestamp, items: old.items, memoryId: old.memoryId, suggestedQuestions: old.suggestedQuestions, replyingToQuestion: old.replyingToQuestion, receiptData: old.receiptData, image: old.image, isScanning: false)
+                        // Update message IN PLACE with the scanned receipt
+                        messages[idx] = ChatMessage(
+                            id: initialMsg.id, 
+                            content: "Receipt Scanned", 
+                            isUser: old.isUser, 
+                            timestamp: old.timestamp, 
+                            items: old.items, 
+                            memoryId: old.memoryId, 
+                            suggestedQuestions: old.suggestedQuestions, 
+                            replyingToQuestion: old.replyingToQuestion, 
+                            receiptData: receipt, // Attach receipt data here
+                            image: old.image, 
+                            isScanning: false
+                        )
                     }
-                    messages.append(ChatMessage(content: "Please review the details above.", isUser: false))
                 }
             } catch {
                 await MainActor.run {
@@ -336,21 +374,43 @@ extension ChatView {
     private var headerView: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
+                // Left: Back / Sidebar
                 Button(action: {}) {
                     HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
+                        Image(systemName: "line.3.horizontal") // Sidebar or Menu? Or Chevron
                             .font(.system(size: 20, weight: .semibold))
                     }
                     .foregroundColor(.white)
                 }
-                .padding(.leading, 8)
+                .padding(.leading, 16)
+                
                 Spacer()
+                
+                // Title (Optional)
+                Text("Owlit AI")
+                    .font(.custom("FKGroteskTrial-Medium", size: 16))
+                    .foregroundColor(.white)
+                
                 Spacer()
-                Spacer()
-                Color.clear.frame(width: 40, height: 40)
+                
+                // Right: New Chat
+                Button(action: {
+                    withAnimation {
+                         messages = []
+                         isLoading = false
+                    }
+                }) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundColor(.white)
+                }
+                .padding(.trailing, 16)
             }
             .padding(.top, 8)
-            .padding(.bottom, 8)
+            .padding(.bottom, 12)
+            
+            Divider()
+                .background(Color.white.opacity(0.1))
         }
         .background(headerBlack)
     }
@@ -453,20 +513,21 @@ struct ChatInputBar: View {
             VStack(alignment: .leading, spacing: 12) {
                 // 1. Text Field Area
                 TextField("Ask anything...", text: $prompt)
-                    .font(.custom("FKGroteskTrial-Medium", size: 18))
+                    .font(.custom("FKGroteskTrial-Medium", size: 16))
                     .padding(.horizontal, 4)
                     .padding(.top, 4)
                     .foregroundColor(.white)
                     .accentColor(.white)
+                    .submitLabel(.send)
                 
                 // 2. Action Row (Below Text)
-                HStack(spacing: 8) {
+                HStack(spacing: 4) {
                     // Plus Icon (Attachment Mock)
                     Button(action: {}) {
                         Image(systemName: "plus")
                             .font(.system(size: 20, weight: .regular))
                             .foregroundColor(.gray)
-                            .frame(width: 44, height: 44)
+                            .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
                     
@@ -475,7 +536,7 @@ struct ChatInputBar: View {
                         Image(systemName: "camera")
                             .font(.system(size: 18, weight: .regular))
                             .foregroundColor(.gray)
-                            .frame(width: 44, height: 44)
+                            .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
                     
@@ -484,7 +545,7 @@ struct ChatInputBar: View {
                         Image(systemName: "photo")
                             .font(.system(size: 18, weight: .regular))
                             .foregroundColor(.gray)
-                            .frame(width: 44, height: 44)
+                            .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
                     
@@ -493,7 +554,7 @@ struct ChatInputBar: View {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 20, weight: .regular))
                             .foregroundColor(.gray)
-                            .frame(width: 44, height: 44)
+                            .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
                     
@@ -514,7 +575,7 @@ struct ChatInputBar: View {
                     .disabled(prompt.isEmpty)
                 }
             }
-            .padding(16)
+            .padding(12)
             .background(Color(white: 0.12)) // Dark gray input bg
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .shadow(color: Color.black.opacity(0.3), radius: 15, x: 0, y: 5)
@@ -547,136 +608,143 @@ struct MessageBubble: View {
     @State private var feedbackGiven: Bool? = nil // nil, true (good), false (bad)
     
     var body: some View {
-        VStack(alignment: message.isUser ? .trailing : .leading, spacing: 6) {
-            HStack(alignment: .bottom, spacing: 4) {
-                if message.isUser {
+        VStack(spacing: 0) {
+            if message.isUser {
+                // USER MESSAGE - Keep as Bubble
+                HStack(alignment: .bottom, spacing: 4) {
                     Spacer()
-                }
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    // Image Display
-                    if let image = message.image {
-                        VStack(spacing: 8) {
-                            Image(uiImage: image)
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let image = message.image {
+                             Image(uiImage: image)
                                 .resizable()
-                                .scaledToFit() // Changed to fix aspect ratio
-                                .frame(maxWidth: 240) // Limit width but let height adjust
+                                .scaledToFit()
+                                .frame(maxWidth: 240)
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
-                            
-                            if message.isScanning {
-                                HStack(spacing: 8) {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                        .tint(.white) // White spinner
-                                    Text(message.content)
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundStyle(.white.opacity(0.9))
-                                        .multilineTextAlignment(.leading)
-                                }
-                                .padding(12)
-                                .background(Color(white: 0.15).opacity(0.9)) // Darker background
-                                .cornerRadius(12)
+                        }
+                        
+                        Text(message.content)
+                            .font(.custom("FKGroteskTrial-Regular", size: 15))
+                            .foregroundColor(.white.opacity(0.9))
+                            .fixedSize(horizontal: false, vertical: true)
+                        
+                        // Receipt Table (Restored for User Bubble)
+                        if let receiptData = message.receiptData {
+                            ReceiptTableView(data: receiptData) {
+                                onEditReceipt?(receiptData)
                             }
+                            .frame(width: 280) // Keep width constrained for bubble
+                            .padding(.top, 4)
                         }
                     }
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                    .background(Color(white: 0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .trailing)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12) // Spacing after user message
+                
+            } else {
+                // AI MESSAGE - Full Width Document Style
+                VStack(alignment: .leading, spacing: 16) {
                     
-                    // Text Content (Only if not scanning or if no image exist, or if we want to show text below image when finished)
-                    if message.image == nil || !message.isScanning {
-                        Text(message.content)
-                            .font(.custom("FKGroteskTrial-Regular", size: 17))
-                            .foregroundColor(.white.opacity(0.9)) // White text
-                            .fixedSize(horizontal: false, vertical: true) // Ensure multiline wraps
+                    // 1. Main Content Text (Full width)
+                    if message.receiptData == nil {
+                         Text(message.content)
+                            .font(.custom("FKGroteskTrial-Regular", size: 16)) // Slightly larger for reading
+                            .foregroundColor(.white.opacity(0.95))
+                            .lineSpacing(4) // Better readability
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     
-                    // Receipt Table
+                    // 2. Receipt Data (If any)
                     if let receiptData = message.receiptData {
                         ReceiptTableView(data: receiptData) {
-                            // Edit Action
                             onEditReceipt?(receiptData)
                         }
-                        .frame(width: 280)
-                        .padding(.top, 4)
+                        .frame(maxWidth: .infinity)
+                        // Add a small label if needed, or keep clean
                     }
                     
-                    // Feedback Buttons (AI Only)
-                    if !message.isUser {
-                        HStack(spacing: 8) {
-                            Button(action: {
+                    // 3. Action Row (Feedback + Tools)
+                    HStack(spacing: 16) {
+                        // Feedback
+                        HStack(spacing: 0) {
+                            Button(action: { 
                                 feedbackGiven = true
-                                onFeedback?(true)
+                                onFeedback?(true) 
                             }) {
-                                HStack(spacing: 4) {
-                                    Text("Good")
-                                        .font(.system(size: 12, weight: .medium))
-                                    Image(systemName: "hand.thumbsup")
-                                        .font(.system(size: 12))
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(feedbackGiven == true ? Color.green.opacity(0.2) : Color.white.opacity(0.1))
-                                .foregroundColor(feedbackGiven == true ? .green : .gray)
-                                .cornerRadius(12)
+                                Image(systemName: "hand.thumbsup")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(feedbackGiven == true ? .green : .gray)
+                                    .padding(8)
                             }
                             
-                            Button(action: {
-                                feedbackGiven = false
-                                onFeedback?(false)
+                            Button(action: { 
+                                codeFeedback(false) 
                             }) {
-                                HStack(spacing: 4) {
-                                    Text("Bad")
-                                        .font(.system(size: 12, weight: .medium))
-                                    Image(systemName: "hand.thumbsdown")
-                                        .font(.system(size: 12))
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(feedbackGiven == false ? Color.red.opacity(0.2) : Color.white.opacity(0.1))
-                                .foregroundColor(feedbackGiven == false ? .red : .gray)
-                                .cornerRadius(12)
+                                Image(systemName: "hand.thumbsdown")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(feedbackGiven == false ? .red : .gray)
+                                    .padding(8)
                             }
                         }
-                        .padding(.top, 4)
+                        
+                        Spacer()
+                        
+                        // Mock Tools (Copy, Share) - Visual only for now as requested by style
+                        Button(action: {}) {
+                            Image(systemName: "square.on.square")
+                                .font(.system(size: 16))
+                                .foregroundColor(.gray)
+                        }
+                        
+                        Button(action: {}) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 16))
+                                .foregroundColor(.gray)
+                        }
                     }
-                }
-                .padding(.vertical, 12)
-                .padding(.horizontal, 16)
-                .background(
-                    message.isUser ? Color(white: 0.15) : Color.black
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: message.isUser ? .trailing : .leading)
-                
-                if !message.isUser {
-                    Spacer()
-                }
-            }
-            .padding(.horizontal, 16)
-            
-            // Suggested Questions (Below AI Bubble)
-            if !message.isUser, let suggestions = message.suggestedQuestions, !suggestions.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(suggestions, id: \.self) { suggestion in
-                            Button(action: { onSuggestionTap?(suggestion) }) {
-                                Text(suggestion)
-                                    .font(.system(size: 13, weight: .medium)) // Used system font for consistency with new additions
-                                    .foregroundStyle(Color.white.opacity(0.8))
-                                    .padding(.vertical, 8)
+                    .padding(.top, 4)
+
+                    // 4. Vertical Suggestions
+                    if let suggestions = message.suggestedQuestions, !suggestions.isEmpty {
+                        VStack(spacing: 8) {
+                            ForEach(suggestions, id: \.self) { suggestion in
+                                Button(action: { onSuggestionTap?(suggestion) }) {
+                                    HStack {
+                                        Text(suggestion)
+                                            .font(.system(size: 15, weight: .medium))
+                                            .foregroundStyle(Color.white.opacity(0.9))
+                                            .multilineTextAlignment(.leading)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundColor(.gray)
+                                    }
+                                    .padding(.vertical, 14)
                                     .padding(.horizontal, 16)
-                                    .background(Color(white: 0.1))
-                                    .cornerRadius(16)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                    )
+                                    .background(Color(white: 0.12)) // Distinct button bg
+                                    .cornerRadius(12)
+                                }
                             }
                         }
+                        .padding(.top, 8)
                     }
-                    .padding(.horizontal, 32) // Indent slightly more than the bubble
                 }
-                .padding(.bottom, 8)
+                .padding(.horizontal, 16) // Full width minus margin
+                .padding(.bottom, 24) // Spacing after AI block
             }
         }
+    }
+    
+    // Helper to fix the feedback closure call in the view body
+    func codeFeedback(_ good: Bool) {
+        feedbackGiven = good
+        onFeedback?(good)
     }
 }
 
