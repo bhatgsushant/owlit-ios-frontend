@@ -657,7 +657,9 @@ struct MessageBubble: View {
     var onFeedback: ((Bool) -> Void)? = nil
     var onSuggestionTap: ((String) -> Void)? = nil
     var onEditReceipt: ((ReceiptData) -> Void)? = nil
+
     @State private var feedbackGiven: Bool? = nil // nil, true (good), false (bad)
+    @State private var isTypingFinished = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -705,13 +707,18 @@ struct MessageBubble: View {
                     // 1. Main Content Text (Full width)
                     if message.receiptData == nil {
                         if message.shouldAnimate {
-                            TypewriterText(fullText: message.content, speed: 0.015) // Adjust speed as needed
+                            TypewriterText(fullText: message.content, speed: 0.015) {
+                                withAnimation {
+                                    isTypingFinished = true
+                                }
+                            }
                         } else {
                             Text(stylizedContent(for: message.content))
-                                .font(.custom("FKGroteskTrial-Regular", size: 16)) // Slightly larger for reading
+                                .font(.custom("FKGroteskTrial-Regular", size: 15)) // Match Suggestions
                                 .foregroundColor(.white.opacity(0.95))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .onAppear { isTypingFinished = true }
                         }
                     }
                     
@@ -767,21 +774,24 @@ struct MessageBubble: View {
 
                     // 4. Vertical Suggestions (Right Aligned Pills)
                     if let suggestions = message.suggestedQuestions, !suggestions.isEmpty {
-                        VStack(alignment: .trailing, spacing: 12) {
-                            ForEach(suggestions, id: \.self) { suggestion in
-                                Button(action: { onSuggestionTap?(suggestion) }) {
-                                    Text(suggestion)
-                                        .font(.custom("FKGroteskTrial-Regular", size: 15)) // Match User Font
-                                        .foregroundStyle(Color.white.opacity(0.9))
-                                        .padding(.vertical, 12)
-                                        .padding(.horizontal, 16)
-                                        .background(Color(white: 0.15)) // Match User Bubble or similar
-                                        .clipShape(Capsule()) // Pill Shape
+                        if isTypingFinished || !message.shouldAnimate {
+                            VStack(alignment: .trailing, spacing: 12) {
+                                ForEach(suggestions, id: \.self) { suggestion in
+                                    Button(action: { onSuggestionTap?(suggestion) }) {
+                                        Text(suggestion)
+                                            .font(.custom("FKGroteskTrial-Regular", size: 15)) // Match User Font
+                                            .foregroundStyle(Color.white.opacity(0.9))
+                                            .padding(.vertical, 12)
+                                            .padding(.horizontal, 16)
+                                            .background(Color(white: 0.15)) // Match User Bubble or similar
+                                            .clipShape(Capsule()) // Pill Shape
+                                    }
                                 }
                             }
+                            .frame(maxWidth: .infinity, alignment: .trailing) // Force right alignment
+                            .padding(.top, 8)
+                            .transition(.opacity)
                         }
-                        .frame(maxWidth: .infinity, alignment: .trailing) // Force right alignment
-                        .padding(.top, 8)
                     }
                 }
                 .padding(.horizontal, 16) // Full width minus margin
@@ -939,6 +949,7 @@ struct ChatMessage: Identifiable {
 struct TypewriterText: View {
     let fullText: String
     let speed: Double // Seconds per character
+    var onComplete: (() -> Void)? = nil
     
     @State private var displayedText: String = ""
     @State private var timer: Timer?
@@ -950,7 +961,7 @@ struct TypewriterText: View {
     
     var body: some View {
         Text(stylizedContent(for: displayedText))
-            .font(.custom("FKGroteskTrial-Regular", size: 16))
+            .font(.custom("FKGroteskTrial-Regular", size: 15))
             .foregroundColor(.white.opacity(0.95))
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -979,6 +990,7 @@ struct TypewriterText: View {
                 // generator.impactOccurred()
             } else {
                 timer.invalidate()
+                onComplete?()
             }
         }
     }
@@ -1040,7 +1052,7 @@ struct AskAIResponse: Codable {
 }
 
 struct SourceItem: Codable, Identifiable {
-    var id: UUID { UUID() } // Dynamic ID for UI loop
+    var id: UUID = UUID() // Dynamic ID for UI loop
     let itemName: String?
     let price: Double?
     let date: String?
@@ -1051,6 +1063,33 @@ struct SourceItem: Codable, Identifiable {
         case price
         case date
         case merchantName = "merchant_name"
+    }
+    
+    // Default Init
+    init(itemName: String? = nil, price: Double? = nil, date: String? = nil, merchantName: String? = nil) {
+        self.itemName = itemName
+        self.price = price
+        self.date = date
+        self.merchantName = merchantName
+    }
+
+    // Robust Decoding
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.itemName = try container.decodeIfPresent(String.self, forKey: .itemName)
+        self.date = try container.decodeIfPresent(String.self, forKey: .date)
+        self.merchantName = try container.decodeIfPresent(String.self, forKey: .merchantName)
+        
+        // Try decoding price as Double first, then String
+        if let doubleVal = try? container.decodeIfPresent(Double.self, forKey: .price) {
+            self.price = doubleVal
+        } else if let stringVal = try? container.decodeIfPresent(String.self, forKey: .price) {
+            // "10.50", "£10.50", etc.
+            let cleaned = stringVal.replacingOccurrences(of: "[^0-9.]", with: "", options: .regularExpression)
+            self.price = Double(cleaned)
+        } else {
+            self.price = nil
+        }
     }
 }
 
