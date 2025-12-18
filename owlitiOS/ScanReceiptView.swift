@@ -143,7 +143,7 @@ struct ScanReceiptView: View {
                     .foregroundColor(textGray)
                 
                 HStack(spacing: 12) {
-                    // Merchant Logo (Logo.dev)
+            // Merchant Logo (Logo.dev)
                     AsyncImage(url: URL(string: "https://img.logo.dev/\(cleanDomain(editedMerchant))?token=pk_Sa5pkb0QQ3CfQPaZgFE7jA&size=60&retina=true")) { phase in
                         if let image = phase.image {
                             image.resizable().aspectRatio(contentMode: .fit)
@@ -152,7 +152,7 @@ struct ScanReceiptView: View {
                             ZStack {
                                 Circle().fill(Color.gray.opacity(0.1))
                                 Text(editedMerchant.prefix(1).uppercased())
-                                    .font(.custom("FKGroteskTrial-Bold", size: 18))
+                                    .font(.custom("FKGroteskTrial-Bold", size: 14)) // Changed to 14
                                     .foregroundColor(textWhite)
                             }
                         } else {
@@ -194,9 +194,20 @@ struct ScanReceiptView: View {
                         .font(.system(size: 14))
                         .foregroundColor(textWhite)
                     
-                    DatePicker("", selection: $editedDate, displayedComponents: .date)
-                        .labelsHidden()
-                        .colorScheme(.dark) // Force dark mode picker
+                    // Custom DatePicker with enforced Font Size 14
+                    ZStack(alignment: .leading) {
+                        // 1. Invisible interactive picker
+                        DatePicker("", selection: $editedDate, displayedComponents: .date)
+                            .labelsHidden()
+                            .colorScheme(.dark)
+                            .opacity(0.02) // Nearly invisible but touchable
+                        
+                        // 2. Visible Text with correct font
+                        Text(dateFormatter.string(from: editedDate))
+                            .font(.custom("FKGroteskTrial-Regular", size: 14))
+                            .foregroundColor(textWhite)
+                            .allowsHitTesting(false) // Let touches pass through to picker
+                    }
                     
                     Spacer()
                 }
@@ -249,12 +260,12 @@ struct ScanReceiptView: View {
                 
                 HStack {
                     Text("£")
-                        .font(.custom("BerkeleyMono-Regular", size: 16))
+                        .font(.custom("BerkeleyMono-Regular", size: 14)) // Changed to 14
                         .foregroundColor(accentGreen)
                     
                     TextField("0.00", value: $editedTotal, format: .number.precision(.fractionLength(2)))
                         .keyboardType(.decimalPad)
-                        .font(.custom("BerkeleyMono-Regular", size: 18))
+                        .font(.custom("BerkeleyMono-Regular", size: 14)) // Changed to 14
                         .foregroundColor(textWhite)
                 }
                 .padding(16)
@@ -528,6 +539,14 @@ struct ScanReceiptView: View {
     // MARK: - Utilities
     func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+    
+    // Helper Formatter
+    var dateFormatter: DateFormatter {
+        let f = DateFormatter()
+        f.dateStyle = .medium // e.g. "Dec 18, 2025"
+        f.timeStyle = .none
+        return f
     }
 
 

@@ -16,10 +16,33 @@ struct ReceiptTableView: View {
             // MARK: - Receipt Header
             VStack(spacing: 4) {
                 if let merchant = data.merchantName {
-                    Text(merchant.uppercased())
-                        .font(.custom("FKGroteskTrial-Bold", size: 14))
-                        .foregroundColor(.white)
-                        .tracking(1) // Letter spacing
+                    HStack(spacing: 8) {
+                        // Merchant Logo
+                         AsyncImage(url: URL(string: "https://img.logo.dev/\(cleanDomain(merchant))?token=pk_Sa5pkb0QQ3CfQPaZgFE7jA&size=60&retina=true")) { phase in
+                             if let image = phase.image {
+                                 image.resizable().aspectRatio(contentMode: .fit)
+                             } else if phase.error != nil || merchant.isEmpty {
+                                 // Fallback
+                                 ZStack {
+                                     Circle().fill(Color.gray.opacity(0.1))
+                                     Text(merchant.prefix(1).uppercased())
+                                         .font(.custom("FKGroteskTrial-Bold", size: 10))
+                                         .foregroundColor(.white)
+                                 }
+                             } else {
+                                 // Loading - keep it subtle
+                                 Color.clear
+                             }
+                         }
+                         .frame(width: 20, height: 20)
+                         .background(Color.white.opacity(0.1))
+                         .clipShape(Circle())
+                        
+                        Text(merchant.uppercased())
+                            .font(.custom("FKGroteskTrial-Bold", size: 14))
+                            .foregroundColor(.white)
+                            .tracking(1) // Letter spacing
+                    }
                 }
                 
                 if let date = data.transactionDate {
@@ -114,7 +137,7 @@ struct ReceiptTableView: View {
                 if item.id != data.lineItems.last?.id {
                      Divider().background(Color.gray.opacity(0.2))
                 }
-            }
+            } // End ForEach
             
             Divider().background(Color.gray.opacity(0.3))
             
@@ -137,5 +160,10 @@ struct ReceiptTableView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
+    }
+    
+    // Helper
+    private func cleanDomain(_ name: String) -> String {
+        return name.lowercased().filter { $0.isLetter || $0.isNumber } + ".com"
     }
 }
