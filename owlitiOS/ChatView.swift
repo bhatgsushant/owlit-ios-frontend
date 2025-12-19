@@ -19,6 +19,9 @@ struct ChatView: View {
     @State private var isManualEntry = false
     @State private var editingMessageId: UUID? // Generic ID for message being edited
     
+    // Finance Popup
+    @State private var selectedMerchant: String? // For sheet presentation
+    
     // Custom Colors
     let pitchBlack = Color(hex: "121212") // Rich Black (Matched from reference)
     let headerBlack = Color.black.opacity(0.95)
@@ -66,6 +69,12 @@ struct ChatView: View {
                                     self.scannedData = data
                                     self.selectedImage = data.originalImage // Might be nil, but View handles it
                                     self.editingMessageId = message.id
+                                },
+                                onAnimationEnd: {
+                                    handleAnimationEnd(for: message.id)
+                                },
+                                onMerchantTap: { merchant in
+                                    self.selectedMerchant = merchant
                                 }
                             )
                             .id(message.id)
@@ -98,6 +107,7 @@ struct ChatView: View {
         .background(pitchBlack)
         .preferredColorScheme(.dark)
         // Sheet for Receipt Review is top level logic
+        // Sheet for Receipt Review is top level logic
         .sheet(item: $scannedData) { data in
             // For manual entry, we might not have a selectedImage, so we check data presence primary
             // But ScanReceiptView expects an image. We can use a dummy image or nil-handling logic.
@@ -110,11 +120,6 @@ struct ChatView: View {
                     // Update In-Place
                     var updatedMsg = messages[index]
                     updatedMsg.receiptData = savedReceipt
-                    // Also update content to "Receipt Saved" if it was "Receipt Scanned" or similar? 
-                    // User might prefer "Receipt Saved" status.
-                    // But typically we just update the data. 
-                    // Let's keep content as is or set to "Receipt Saved"
-                    // updatedMsg.content = "Receipt Saved" 
                     
                     withAnimation {
                          messages[index] = updatedMsg
@@ -129,6 +134,15 @@ struct ChatView: View {
                 }
             }
                 .environmentObject(authManager)
+        }
+        // Finance Sheet
+        .sheet(item: Binding<String?>(
+            get: { selectedMerchant },
+            set: { selectedMerchant = $0 }
+        )) { merchant in
+            FinancialSummaryView(merchant: merchant)
+                .presentationDetents([.fraction(0.6), .medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .onAppear { loadRecentChats() }
     }
@@ -258,18 +272,19 @@ struct ChatView: View {
                             // Success - Saved
                             if let savedR = try? JSONDecoder().decode(ReceiptData.self, from: saveData) {
                                 receipt = savedR
-                                finalMessage = "Receipt Saved (ID: \(savedR.id ?? "Unknown")).\nTap pencil to edit."
+                                finalMessage = "Receipt Successfully Saved"
+                                receipt = savedR // Ensure ID matches
                             } else {
-                                finalMessage = "Receipt Saved.\nTap pencil to edit."
+                                finalMessage = "Receipt Successfully Saved"
                             }
                         } else if httpResp.statusCode == 409 {
                             // Duplicate
                             if let json = try? JSONSerialization.jsonObject(with: saveData) as? [String: Any],
                                let existingId = json["existingReceiptId"] as? String {
                                 receipt.id = existingId
-                                finalMessage = "Receipt already present (ID: \(existingId)).\nTap pencil to edit."
+                                finalMessage = "Receipt Already Present. Click to Edit."
                             } else {
-                                finalMessage = "Receipt already present.\nTap pencil to edit."
+                                finalMessage = "Receipt Already Present. Click to Edit."
                             }
                         } else {
                             // Save Failed
@@ -303,7 +318,8 @@ struct ChatView: View {
                             replyingToQuestion: old.replyingToQuestion, 
                             receiptData: receipt, // Attach receipt data here
                             image: old.image, 
-                            isScanning: false
+                            isScanning: false,
+                            style: finalMessage.contains("Successfully") ? .success : (finalMessage.contains("Already Present") ? .error : .normal)
                         )
                     }
                 }
@@ -354,8 +370,29 @@ struct ChatView: View {
         
         Task {
             do {
-                let history = messages.dropLast().compactMap { msg -> [String: String]? in
-                    return ["role": msg.isUser ? "user" : "ai", "text": msg.content]
+                let history = messages.dropLast().compactMap { msg -> [String: Any]? in
+                    var dict: [String: Any] = [
+                        "role": msg.isUser ? "user" : "ai",
+                        "text": msg.content
+                    ]
+                    
+                    if let memoryId = msg.memoryId {
+                        dict["memory_id"] = memoryId
+                    }
+                    
+                    if let items = msg.items {
+                        let itemsDict = items.map { item -> [String: Any] in
+                            var idict: [String: Any] = [:]
+                            if let name = item.itemName { idict["item_name"] = name }
+                            if let price = item.price { idict["price"] = price }
+                            if let date = item.date { idict["date"] = date }
+                            if let merchant = item.merchantName { idict["merchant_name"] = merchant }
+                            return idict
+                        }
+                        dict["items"] = itemsDict
+                    }
+                    
+                    return dict
                 }
                 
                 let body: [String: Any] = ["question": trimmed, "history": history]
@@ -413,6 +450,15 @@ struct ChatView: View {
         }
     }
     
+    private func handleAnimationEnd(for id: UUID) {
+        if let index = messages.firstIndex(where: { $0.id == id }) {
+            // Only update if it was animating to prevent unnecessary writes
+            if messages[index].shouldAnimate {
+                messages[index].shouldAnimate = false
+            }
+        }
+    }
+    
     private var currentDateString: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
@@ -422,6 +468,14 @@ struct ChatView: View {
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+    
+}
+
+// Global Helper (File Private)
+fileprivate func triggerHaptic(style: UIImpactFeedbackGenerator.FeedbackStyle) {
+    let generator = UIImpactFeedbackGenerator(style: style)
+    generator.prepare()
+    generator.impactOccurred()
 }
 
 // MARK: - Extracted Subviews
@@ -468,82 +522,40 @@ extension ChatView {
     }
     
     private var welcomeView: some View {
-        VStack(spacing: 24) {
-            Spacer(minLength: 60)
-            HStack(spacing: 16) {
-                OwlitLogo(size: 44)
-                    .shadow(color: .white.opacity(0.1), radius: 10)
-                Rectangle()
-                    .fill(Color.gray.opacity(0.5))
-                    .frame(width: 1, height: 36)
-                HStack(spacing: 0) {
-                    Text("Hi ")
-                        .font(.custom("FKGroteskTrial-Regular", size: 24))
-                        .foregroundStyle(.white.opacity(0.9))
-                    Text((authManager.user?.bestDisplayName ?? "User") + " !")
-                        .font(.custom("FKGroteskTrial-Medium", size: 20))
-                        .foregroundStyle(Color.blue)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 2)
-                        .background(Color.white)
-                        .cornerRadius(6)
-                }
-            }
-            .padding(.bottom, 40)
+        VStack(alignment: .leading, spacing: 8) {
+            Spacer()
             
-            if !recentChats.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Recent")
-                        .font(.custom("FKGroteskTrial-Regular", size: 14))
-                        .foregroundStyle(.gray)
-                        .padding(.horizontal, 4)
-                    
-                    ForEach(recentChats) { chat in
-                        Button(action: { submitQuery(chat.title) }) {
-                            HStack {
-                                Image(systemName: "clock")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.gray)
-                                Text(chat.title)
-                                    .font(.custom("FKGroteskTrial-Regular", size: 15))
-                                    .foregroundStyle(.white.opacity(0.9))
-                                    .lineLimit(1)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.gray.opacity(0.5))
-                            }
-                            .padding(16)
-                            .background(Color(white: 0.1))
-                            .cornerRadius(16)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                            )
-                        }
-                    }
-                }
-                .padding(.horizontal, 32)
-            } else {
-                FlowLayout(spacing: 8) {
-                    ForEach(quickReplies, id: \.self) { reply in
-                        Button(action: { submitQuery(reply) }) {
-                            Text(reply)
-                                .font(.custom("FKGroteskTrial-Medium", size: 13))
-                                .foregroundStyle(.white.opacity(0.9))
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 16)
-                                .background(Color(white: 0.1))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                )
-                        }
-                    }
-                }
-                .padding(.horizontal, 32)
+            // "Hello Username"
+            HStack(spacing: 8) {
+                Text("Hello")
+                    .font(.system(size: 44, weight: .regular, design: .serif))
+                    .foregroundColor(.white)
+                
+                // Animated Name
+                ShimmerName(name: (authManager.user?.bestDisplayName ?? "User").components(separatedBy: " ").first?.capitalized ?? "User")
             }
+            
+            Text("How can I help")
+                .font(.system(size: 44, weight: .regular, design: .serif))
+                .foregroundColor(.white)
+            
+            Text("you today")
+                .font(.system(size: 44, weight: .regular, design: .serif))
+                .foregroundColor(.white)
+            
+            // Footer: App Icon + Name
+            HStack(spacing: 8) {
+                OwlitLogo(size: 18)
+                Text("Owlit")
+                    .font(.custom("FKGroteskTrial-Regular", size: 14))
+                    .foregroundColor(.gray)
+            }
+            .padding(.top, 16)
+            
+            Spacer()
         }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
 
@@ -565,7 +577,7 @@ struct ChatInputBar: View {
             VStack(alignment: .leading, spacing: 12) {
                 // 1. Text Field Area
                 TextField("Ask anything...", text: $prompt)
-                    .font(.custom("FKGroteskTrial-Medium", size: 16))
+                    .font(.custom("FKGroteskTrial-Regular", size: 16))
                     .padding(.horizontal, 4)
                     .padding(.top, 4)
                     .foregroundColor(.white)
@@ -619,7 +631,7 @@ struct ChatInputBar: View {
                     }) {
                         Image(systemName: "arrow.right")
                             .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.black)
+                            .foregroundColor(.blue)
                             .frame(width: 32, height: 32)
                             .background(prompt.isEmpty ? Color.gray.opacity(0.3) : Color.white)
                             .clipShape(Circle())
@@ -657,6 +669,8 @@ struct MessageBubble: View {
     var onFeedback: ((Bool) -> Void)? = nil
     var onSuggestionTap: ((String) -> Void)? = nil
     var onEditReceipt: ((ReceiptData) -> Void)? = nil
+    var onAnimationEnd: (() -> Void)? = nil
+    var onMerchantTap: ((String) -> Void)? = nil
 
     @State private var feedbackGiven: Bool? = nil // nil, true (good), false (bad)
     @State private var isTypingFinished = false
@@ -675,11 +689,12 @@ struct MessageBubble: View {
                                 .scaledToFit()
                                 .frame(maxWidth: 240)
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .frame(maxWidth: .infinity, alignment: .center) // Center Image
                         }
                         
                         Text(message.content)
                             .font(.custom("FKGroteskTrial-Regular", size: 15))
-                            .foregroundColor(.white.opacity(0.9))
+                            .foregroundColor(message.style == .success ? .white : (message.style == .error ? Color(hex: "FF3B30") : .white.opacity(0.9)))
                             .fixedSize(horizontal: false, vertical: true)
                         
                         // Receipt Table (Restored for User Bubble)
@@ -693,7 +708,7 @@ struct MessageBubble: View {
                     }
                     .padding(.vertical, 12)
                     .padding(.horizontal, 16)
-                    .background(Color(white: 0.15))
+                    .background(message.style == .success ? Color(hex: "56CCF2") : Color(white: 0.15))
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .trailing)
                 }
@@ -710,14 +725,31 @@ struct MessageBubble: View {
                             TypewriterText(fullText: message.content, speed: 0.015) {
                                 withAnimation {
                                     isTypingFinished = true
+                                    onAnimationEnd?()
                                 }
                             }
+                            .environment(\.openURL, OpenURLAction { url in
+                                if url.scheme == "merchant" {
+                                    let merchantName = url.absoluteString.replacingOccurrences(of: "merchant://", with: "")
+                                    onMerchantTap?(merchantName)
+                                    return .handled
+                                }
+                                return .systemAction
+                            })
                         } else {
-                            Text(stylizedContent(for: message.content))
-                                .font(.custom("FKGroteskTrial-Regular", size: 15)) // Match Suggestions
+                            Text(TextFormatter.format(message.content))
+                                .font(.custom("FKGroteskTrial-Regular", size: 15)) // Reverted to FK Grotesk
                                 .foregroundColor(.white.opacity(0.95))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .environment(\.openURL, OpenURLAction { url in
+                                    if url.scheme == "merchant" {
+                                        let merchantName = url.absoluteString.replacingOccurrences(of: "merchant://", with: "")
+                                        onMerchantTap?(merchantName)
+                                        return .handled
+                                    }
+                                    return .systemAction
+                                })
                                 .onAppear { isTypingFinished = true }
                         }
                     }
@@ -777,7 +809,10 @@ struct MessageBubble: View {
                         if isTypingFinished || !message.shouldAnimate {
                             VStack(alignment: .trailing, spacing: 12) {
                                 ForEach(suggestions, id: \.self) { suggestion in
-                                    Button(action: { onSuggestionTap?(suggestion) }) {
+                                    Button(action: { 
+                                        triggerHaptic(style: .medium)
+                                        onSuggestionTap?(suggestion) 
+                                    }) {
                                         Text(suggestion)
                                             .font(.custom("FKGroteskTrial-Regular", size: 15)) // Match User Font
                                             .foregroundStyle(Color.white.opacity(0.9))
@@ -804,52 +839,6 @@ struct MessageBubble: View {
     func codeFeedback(_ good: Bool) {
         feedbackGiven = good
         onFeedback?(good)
-    }
-    
-    // Text Styler
-    func stylizedContent(for text: String) -> AttributedString {
-        // 1. Clean up Double Asterisks (Markdown Bold)
-        var cleanedText = text.replacingOccurrences(of: "(?m)^\\*\\*\\s?", with: "", options: .regularExpression)
-        
-        // 2. Replace Numbered Lists (1., 2.) with Bullet Points (●) + Tab
-        // Regex: Start of line, digits, dot, space -> replace with Unicode Bullet + Tab
-        cleanedText = cleanedText.replacingOccurrences(of: "(?m)^\\d+\\.\\s", with: "●\t", options: .regularExpression)
-        
-        var attributed = AttributedString(cleanedText)
-        
-        // 3. Highlight Numbers & Currency (Professional Style)
-        do {
-            if #available(iOS 16.0, *) {
-                // Regex for Currency (optional) + Digits + Decimals
-                // Matches: £10.50, $100, 500, 10.5
-                let regex = try Regex("[$£€]?[0-9,.]+[0-9]") 
-                let matches = cleanedText.matches(of: regex)
-                for match in matches {
-                    if let range = Range(match.range, in: attributed) {
-                        // Apply Bold Monospaced Font
-                        attributed[range].font = .system(size: 14, weight: .medium, design: .monospaced)
-                        attributed[range].foregroundColor = .white // Ensure high contrast
-                    }
-                }
-            }
-        } catch { print("Regex error: \(error)") }
-        
-        // 4. Apply Paragraph Style (Hanging Indent)
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.headIndent = 35 // Indent wrapping lines (statement start position) - Increased for clarity
-        paragraphStyle.firstLineHeadIndent = 0 // Bullet starts at 0
-        paragraphStyle.paragraphSpacing = 16 // Gap between block paragraphs
-        paragraphStyle.paragraphSpacingBefore = 0
-        paragraphStyle.lineSpacing = 5 // Moved from View modifier to here to avoid conflict
-        
-        // Tab Stop for the text after bullet
-        let tabStop = NSTextTab(textAlignment: .left, location: 35, options: [:])
-        paragraphStyle.tabStops = [tabStop]
-        paragraphStyle.defaultTabInterval = 35
-        
-        attributed.mergeAttributes(AttributeContainer([.paragraphStyle: paragraphStyle]))
-        
-        return attributed
     }
 }
 
@@ -911,6 +900,9 @@ struct ChatMessage: Identifiable {
     var replyingToQuestion: String?
     var receiptData: ReceiptData?
     
+    // UI Style
+    var style: ChatMessageStyle = .normal
+    
     // Receipt Scanning
     var image: UIImage?
     var isScanning: Bool
@@ -929,7 +921,8 @@ struct ChatMessage: Identifiable {
          receiptData: ReceiptData? = nil,
          image: UIImage? = nil, 
          isScanning: Bool = false,
-         shouldAnimate: Bool = false) {
+         shouldAnimate: Bool = false,
+         style: ChatMessageStyle = .normal) {
         self.id = id
         self.content = content
         self.isUser = isUser
@@ -942,7 +935,14 @@ struct ChatMessage: Identifiable {
         self.image = image
         self.isScanning = isScanning
         self.shouldAnimate = shouldAnimate
+        self.style = style
     }
+}
+
+enum ChatMessageStyle: String, Codable {
+    case normal
+    case success
+    case error
 }
 
 // MARK: - Typewriter Text Component
@@ -960,7 +960,7 @@ struct TypewriterText: View {
     // Given the constraints, I will copy the styling logic here to ensure it works autonomously.
     
     var body: some View {
-        Text(stylizedContent(for: displayedText))
+        Text(TextFormatter.format(displayedText))
             .font(.custom("FKGroteskTrial-Regular", size: 15))
             .foregroundColor(.white.opacity(0.95))
             .fixedSize(horizontal: false, vertical: true)
@@ -985,55 +985,17 @@ struct TypewriterText: View {
             if displayedText.count < fullText.count {
                 let index = fullText.index(fullText.startIndex, offsetBy: displayedText.count)
                 displayedText.append(fullText[index])
-                // Haptic feedback for typing feel? Maybe too much.
-                // let generator = UIImpactFeedbackGenerator(style: .light)
-                // generator.impactOccurred()
+                
+                // Haptic Feedback
+                if displayedText.count % 3 == 0 {
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                }
             } else {
                 timer.invalidate()
                 onComplete?()
             }
         }
-    }
-    
-    // Copied Styling Logic (Unified)
-    private func stylizedContent(for text: String) -> AttributedString {
-        // 1. Clean up Double Asterisks
-        var cleanedText = text.replacingOccurrences(of: "(?m)^\\*\\*\\s?", with: "", options: .regularExpression)
-        
-        // 2. Replace Numbered Lists with Bullet Points + Tab
-        cleanedText = cleanedText.replacingOccurrences(of: "(?m)^\\d+\\.\\s", with: "●\t", options: .regularExpression)
-        
-        var attributed = AttributedString(cleanedText)
-        
-        // 3. Highlight Numbers & Currency (Professional Style)
-        do {
-            if #available(iOS 16.0, *) {
-                let regex = try Regex("[$£€]?[0-9,.]+[0-9]")
-                let matches = cleanedText.matches(of: regex)
-                for match in matches {
-                    if let range = Range(match.range, in: attributed) {
-                        attributed[range].font = .system(size: 15, weight: .bold, design: .monospaced)
-                        attributed[range].foregroundColor = .white
-                    }
-                }
-            }
-        } catch { print("Regex error: \(error)") }
-        
-        // 4. Paragraph Style (Hanging Indent)
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.headIndent = 35 // Increased Indent
-        paragraphStyle.firstLineHeadIndent = 0
-        paragraphStyle.paragraphSpacing = 16
-        paragraphStyle.paragraphSpacingBefore = 0
-        paragraphStyle.lineSpacing = 5 // Internal line spacing
-        
-        let tabStop = NSTextTab(textAlignment: .left, location: 35, options: [:])
-        paragraphStyle.tabStops = [tabStop]
-        paragraphStyle.defaultTabInterval = 35
-        
-        attributed.mergeAttributes(AttributeContainer([.paragraphStyle: paragraphStyle]))
-        
-        return attributed
     }
 }
 
