@@ -33,9 +33,11 @@ struct LoginView: View {
                             .foregroundStyle(.white)
                             .tracking(1) // Slight letter spacing
                         
-                        Text("Financial intelligence, reimagined.")
+                        Text("Owlit AI Spending Analyst helps to find Insights of your Expenses\nFaster and easier than ever")
                             .font(.custom("FKGroteskTrial-Regular", size: 16))
                             .foregroundStyle(.white.opacity(0.6))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
                     }
                 }
                 .padding(.bottom, 80) // Push it up slightly from visual center

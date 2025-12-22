@@ -180,6 +180,42 @@ class APIClient {
         
         return body
     }
+    // MARK: - Insights
+    func fetchMerchantSummary(merchant: String, token: String) async throws -> MerchantSummary {
+        // Construct URL using URLComponents to handle query parameters correctly
+        guard var components = URLComponents(url: baseURL.appendingPathComponent("/api/insights/merchant"), resolvingAgainstBaseURL: true) else {
+            throw URLError(.badURL)
+        }
+        
+        // Add Query Parameter
+        components.queryItems = [
+            URLQueryItem(name: "merchant_name", value: merchant)
+        ]
+        
+        guard let url = components.url else {
+            throw URLError(.badURL)
+        }
+        
+        // Create Request Manually to avoid buildRequest's appendingPathComponent issue with params
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        // Debug
+        print("Fetching Merchant Summary URL: \(url.absoluteString)")
+        
+        let (data, response) = try await session.data(for: request)
+        
+        // Check for non-200 status
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+             print("❌ Error Fetching Summary: \(httpResponse.statusCode)")
+             if let str = String(data: data, encoding: .utf8) { print("Body: \(str)") }
+             throw URLError(.badServerResponse)
+        }
+        
+        return try JSONDecoder().decode(MerchantSummary.self, from: data)
+    }
 }
 
 extension Data {

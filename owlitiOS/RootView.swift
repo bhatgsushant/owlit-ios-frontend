@@ -28,6 +28,8 @@ enum Tab: String, CaseIterable {
 struct RootView: View {
     @EnvironmentObject var auth: AuthManager
     @State private var selectedTab: Tab = .scan
+    @State private var hasSeenWelcome = false
+    @State private var isLaunching = true
     
     // Hide native tab bar
     init() {
@@ -40,7 +42,14 @@ struct RootView: View {
             AuroraBackground()
                 .overlay(Color.black.opacity(0.1)) // Subtle Dim for Card POP
             
-            if auth.isLoading {
+            if !hasSeenWelcome {
+                WelcomeLandingView {
+                    withAnimation {
+                        hasSeenWelcome = true
+                    }
+                }
+                .transition(.opacity)
+            } else if auth.isLoading {
                 LoadingView()
             } else if auth.isAuthenticated {
                 ChatView()
@@ -51,8 +60,22 @@ struct RootView: View {
             }
         }
         .animation(.spring(response: 0.5, dampingFraction: 0.8), value: auth.isAuthenticated)
+        // Global App Launch Animation (Like iOS Unlock)
+        .scaleEffect(isLaunching ? 0.9 : 1.0)
+        .opacity(isLaunching ? 0 : 1.0)
+        .onAppear {
+            withAnimation(.interactiveSpring(response: 0.6, dampingFraction: 0.7, blendDuration: 0.6)) {
+                isLaunching = false
+            }
+        }
         .onOpenURL { url in
             handleDeepLink(url)
+        }
+        .onChange(of: auth.isAuthenticated) { isAuthenticated in
+            if !isAuthenticated {
+                // Reset welcome flow when user logs out
+                hasSeenWelcome = false
+            }
         }
     }
     

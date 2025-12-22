@@ -2,8 +2,14 @@ import SwiftUI
 
 struct OwlitLogo: View {
     var size: CGFloat = 80
+    var isScanning: Bool = false
+    
+    @State private var isInverted = false
     
     var body: some View {
+        let faceColor = isInverted ? Color(hex: "DFFF00") : Color.white
+        let featureColor = isInverted ? Color.white : Color.black
+        
         ZStack {
             // White Face Shape
             Path { path in
@@ -25,17 +31,17 @@ struct OwlitLogo: View {
                               control2: CGPoint(x: 28, y: 108))
                 path.closeSubpath()
             }
-            .fill(Color.white)
+            .fill(faceColor)
             
             // Left Eye
             Circle()
-                .fill(Color.black)
+                .fill(featureColor)
                 .frame(width: 18, height: 18) // r=9 * 2
                 .position(x: 48, y: 60)
             
             // Right Eye
             Circle()
-                .fill(Color.black)
+                .fill(featureColor)
                 .frame(width: 18, height: 18)
                 .position(x: 80, y: 60)
             
@@ -46,11 +52,23 @@ struct OwlitLogo: View {
                 path.addLine(to: CGPoint(x: 72, y: 86))
                 path.closeSubpath()
             }
-            .fill(Color.black)
+            .fill(featureColor)
         }
         // Scale the 128x128 coordinate system to the desired size
         .frame(width: 128, height: 128)
         .scaleEffect(size / 128)
         .frame(width: size, height: size)
+        .task(id: isScanning) {
+            if isScanning {
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+                    withAnimation(nil) { // Instant switch, no interpolation
+                         isInverted.toggle()
+                    }
+                }
+            } else {
+                isInverted = false
+            }
+        }
     }
 }

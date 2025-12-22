@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- Face -->
+    <path d="M28 34 L64 16 L100 34 L100 92 C100 108 84 116 64 116 C44 116 28 108 28 92 Z" fill="white" stroke="black" stroke-width="2"/>
+    
+    <!-- Left Eye -->
+    <circle cx="48" cy="60" r="9" fill="black"/>
+    
+    <!-- Right Eye -->
+    <circle cx="80" cy="60" r="9" fill="black"/>
+    
+    <!-- Beak -->
+    <path d="M64 72 L56 86 L72 86 Z" fill="black"/>
+</svg>
