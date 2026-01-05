@@ -17,7 +17,7 @@ xcuserdata/
 
 # Backend / Node
 node_modules/
-server.js
+
 auth.js
 .env
 package-lock.json

@@ -2,16 +2,16 @@ import SwiftUI
 import Foundation
 
 struct TextFormatter {
-    static func format(_ text: String) -> AttributedString {
+    static func format(_ text: String, isDarkMode: Bool = true) -> AttributedString {
         // 1. Clean up Text (Lists)
         var cleanedText = text
-        // Replace list markers with Bullet + Tab
-        cleanedText = cleanedText.replacingOccurrences(of: "(?m)^\\d+\\.\\s", with: "●\t", options: .regularExpression)
-        cleanedText = cleanedText.replacingOccurrences(of: "(?m)^[\\*\\-]\\s", with: "●\t", options: .regularExpression)
+        // Replace list markers with Bullet + 2 Spaces (Flush Left)
+        cleanedText = cleanedText.replacingOccurrences(of: "(?m)^\\d+\\.\\s", with: "●  ", options: .regularExpression)
+        cleanedText = cleanedText.replacingOccurrences(of: "(?m)^[\\*\\-]\\s", with: "●  ", options: .regularExpression)
         
         // 1b. Linkify Keywords (before bold checking)
-        // Note: Doing this at string level is simpler than AttributedString for the link logic
-        let merchants = ["Alphabet", "Google", "Apple", "Tesco", "Microsoft", "Co-op"]
+        // ... (lines 14-22 unchanged, kept for context match)
+        let merchants = ["Alphabet", "Google", "Apple", "Tesco", "Microsoft", "Co-op","Lidl"]
         for merchant in merchants {
             // Regex to match whole word, case insensitive
             let pattern = "(?i)\\b(\(merchant))\\b"
@@ -30,7 +30,8 @@ struct TextFormatter {
             let before = currentText[..<range.lowerBound]
             var normalPart = AttributedString(String(before))
             normalPart.font = .custom("FKGroteskTrial-Regular", size: 15)
-            finalAttributed += normalPart
+            finalAttributed
+            += normalPart
             
             // B. Content inside ** **
             let match = currentText[range]
@@ -70,7 +71,7 @@ struct TextFormatter {
                     // Convert String Range to AttributedString Range
                     if let attrRange = Range(match.range, in: finalAttributed) {
                         finalAttributed[attrRange].font = .system(size: 15, weight: .bold, design: .monospaced)
-                        finalAttributed[attrRange].foregroundColor = .white
+                        finalAttributed[attrRange].foregroundColor = isDarkMode ? .white : .black
                     }
                 }
             } catch {
@@ -79,9 +80,9 @@ struct TextFormatter {
         }
         
         // 3.5 Highlight Merchant Keywords (Green + Bold + Link)
-        // We do this after regex to layer on top
+        // ... (lines 83-103 unchanged)
         if #available(iOS 16.0, *) {
-             let merchants = ["Alphabet", "Google", "Apple", "Tesco", "Microsoft", "Co-op"]
+             let merchants = ["Alphabet", "Google", "Apple", "Tesco", "Microsoft", "Co-op", "Lidl", "Aldi", "Asda", "Sainsbury's", "Morrisons", "Waitrose"]
              for merchant in merchants {
                  do {
                      let regex = try Regex("(?i)\\b\(merchant)\\b")
@@ -94,8 +95,11 @@ struct TextFormatter {
                              finalAttributed[attrRange].font = .custom("FKGroteskTrial-Regular", size: 15) // Match Body Font
                              // #20808D -> R:32, G:128, B:141
                              finalAttributed[attrRange].foregroundColor = Color(red: 32/255, green: 128/255, blue: 141/255)
-                             // Add URL attribute
-                             finalAttributed[attrRange].link = URL(string: "merchant://\(merchant)")
+                             // Add URL attribute with encoding
+                             if let encoded = merchant.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed),
+                                let url = URL(string: "merchant://\(encoded)") {
+                                 finalAttributed[attrRange].link = url
+                             }
                          }
                      }
                  } catch { }
@@ -105,22 +109,44 @@ struct TextFormatter {
         // 4. Paragraph & Global Style
         var container = AttributeContainer()
         
-        // Paragraph Style
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.headIndent = 35 // Hanging indent
-        paragraphStyle.firstLineHeadIndent = 0
-        paragraphStyle.paragraphSpacing = 16
-        paragraphStyle.paragraphSpacingBefore = 4
-        paragraphStyle.lineSpacing = 4 
+        // A. Default Paragraph Style (No Indent)
+        let defaultParagraphStyle = NSMutableParagraphStyle()
+        defaultParagraphStyle.headIndent = 0
+        defaultParagraphStyle.firstLineHeadIndent = 0
+        defaultParagraphStyle.paragraphSpacing = 16
+        defaultParagraphStyle.paragraphSpacingBefore = 4
+        defaultParagraphStyle.lineSpacing = 4
         
-        let tabStop = NSTextTab(textAlignment: .left, location: 35, options: [:])
-        paragraphStyle.tabStops = [tabStop]
-        paragraphStyle.defaultTabInterval = 35
+        // B. List Paragraph Style (Hanging Indent)
+        let listParagraphStyle = NSMutableParagraphStyle()
+        listParagraphStyle.headIndent = 17 // Indent wrapped lines to align with text (Bullet + 2 Spaces)
+        listParagraphStyle.firstLineHeadIndent = 0 // Bullet stays at 0 (Flush Left)
+        listParagraphStyle.paragraphSpacing = 16
+        listParagraphStyle.paragraphSpacingBefore = 4
+        listParagraphStyle.lineSpacing = 4
         
-        container.paragraphStyle = paragraphStyle
-        container.foregroundColor = .white.opacity(0.95) // Base color
+        // No Tab Stops needed for Space separation
         
+        // Apply Default Global Style
+        container.paragraphStyle = defaultParagraphStyle
+        container.foregroundColor = isDarkMode ? Color.white.opacity(0.95) : Color.black.opacity(0.9)
         finalAttributed.mergeAttributes(container, mergePolicy: .keepCurrent)
+        
+        // 5. Apply List Style to Bullet Points ONLY
+        if #available(iOS 16.0, *) {
+            do {
+                // Match lines starting with Bullet + Space
+                let listRegex = try Regex("(?m)^● .*")
+                let plainString = String(finalAttributed.characters)
+                let matches = plainString.matches(of: listRegex)
+                
+                for match in matches {
+                    if let attrRange = Range(match.range, in: finalAttributed) {
+                        finalAttributed[attrRange].paragraphStyle = listParagraphStyle
+                    }
+                }
+            } catch { }
+        }
         
         return finalAttributed
     }

@@ -11,6 +11,7 @@ struct ChatView: View {
     @EnvironmentObject var authManager: AuthManager
     @State private var messages: [ChatMessage] = []
     @State private var isLoading: Bool = false
+    @AppStorage("isDarkMode") var isDarkMode = true
     
     // Receipt Scanning State (Maintained at top level to handle the result)
     @State private var scannedData: ReceiptData?
@@ -22,14 +23,33 @@ struct ChatView: View {
     // UI Logic
     @State private var scanningSteps: [String] = []
     @State private var showSuccessPopup = false
+    @State private var inputOverlayHeight: CGFloat = 110 // Default start height
     
     // Finance Popup
-    @State private var selectedMerchant: String? // For sheet presentation
+    @State private var selectedMerchantResolution: MerchantResolution?
+    @State private var isResolvingMerchant = false
+    @State private var resolvingMerchantName: String?
     
-    // Custom Colors
-    let pitchBlack = Color.black // Pure Black as requested
-    let headerBlack = Color.black.opacity(0.95)
+    // Scroll Trigger (for explicit scroll requests)
+    @State private var scrollTrigger: Int = 0
     
+    // Copy Toast State
+    @State private var showCopyToast = false
+    @State private var showHealthOverview = false
+
+    
+    // Focus State for Input Field
+    @FocusState private var isInputFocused: Bool
+    
+    // Dynamic Theme Colors
+    var themeBackground: Color { isDarkMode ? .black : Color(uiColor: .systemGray6) }
+    var themeText: Color { isDarkMode ? .white : .black }
+    var themeSecondaryBackground: Color { isDarkMode ? Color(white: 0.12) : .white }
+    var themeHeaderBackground: Color { isDarkMode ? Color.black.opacity(0.95) : Color(uiColor: .systemGray6).opacity(0.95) }
+    
+    // Legacy fixed colors (keeping for reference if needed, but mostly replacing)
+    let pitchBlack = Color.black 
+
     // Quick Replies
     let quickReplies = [
         "Spend Summary",
@@ -42,115 +62,45 @@ struct ChatView: View {
         ZStack {
             ZStack(alignment: .top) {
                 // MARK: - Layer 0: Full Screen Content
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(spacing: 12) {
-                            // Spacer for Header (Dynamic or Fixed?)
-                            // Header is approx 50-60pt total? Padding 8+12+24 = 44 + SafeArea.
-                            // Let's use a safe spacer 
-                            Color.clear.frame(height: 60)
-                            
-                            // Date Header
-                            Text("Today \(currentDateString)")
-                                .font(.custom("BerkeleyMono-Regular", size: 11))
-                                .foregroundStyle(.gray)
-                                .padding(.top, 16)
-                                .padding(.bottom, 8)
-                            
-                            if messages.isEmpty {
-                                welcomeView
-                            }
-                            
-                            // Messages
-                            ForEach(messages) { message in
-                                MessageBubble(
-                                    message: message,
-                                    onFeedback: { isPositive in
-                                        sendFeedback(message: message, isPositive: isPositive)
-                                    },
-                                    onSuggestionTap: { suggestion in
-                                        submitQuery(suggestion)
-                                    },
-                                    onEditReceipt: { data in
-                                        // Trigger the sheet with existing data
-                                        self.scannedData = data
-                                        self.selectedImage = data.originalImage // Might be nil, but View handles it
-                                        self.editingMessageId = message.id
-                                    },
-                                    onAnimationEnd: {
-                                        handleAnimationEnd(for: message.id)
-                                    },
-                                    onMerchantTap: { merchant in
-                                        self.selectedMerchant = merchant
-                                    }
-                                )
-                                .id(message.id)
-                            }
-                            
-                            // Scanning Progress moved to floating overlay
-                            
-                            if isLoading {
-                                typingIndicator
-                                    .padding(.leading, 20)
-                                    .padding(.top, 4)
-                            }
-                            
-                            // Spacer for input area - Increased to avoid hiding behind tab bar
-                            Color.clear.frame(height: 160).id("BOTTOM")
-                        }
-                        .padding(.bottom, 0)
-                    }
-                    .background(pitchBlack)
-                    .ignoresSafeArea() // True Full Screen
-                    .onChange(of: messages.count) { _ in
-                        withAnimation { proxy.scrollTo("BOTTOM", anchor: .bottom) }
-                    }
-                    .onChange(of: scanningSteps.count) { _ in
-                         withAnimation { proxy.scrollTo("SCANNING_PROGRESS", anchor: .bottom) }
-                    }
-                }
-                .zIndex(0)
-                .onTapGesture {
-                    // Dimiss Keyboard on Tap
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                }
+                scrollableContent
                 
                 // MARK: - Layer 1: Header Overlay
                 headerView
                     .zIndex(2)
                 
                 // MARK: - Layer 2: Input Bar Overlay
-                VStack(spacing: 0) {
-                    Spacer()
+                inputOverlay
+                    .zIndex(3)
+                
+                // MARK: - Layer 3: Toast Overlay
+                toastOverlay
+                    .zIndex(4)
                     
-                    // Specific placement for Scanning Progress: Floating above the bar
-                    if !scanningSteps.isEmpty {
-                        ScanningProgressView(steps: scanningSteps)
-                            .padding(.bottom, 8)
-                            .padding(.horizontal, 16)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                // MARK: - Layer 4: Loading Overlay (Merchant Resolution)
+                if isResolvingMerchant {
+                    ZStack {
+                        Color.black.opacity(0.4).ignoresSafeArea()
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(1.2)
+                            Text("Resolving \(resolvingMerchantName ?? "Merchant")...")
+                                .font(.custom("FKGroteskTrial-Regular", size: 14))
+                                .foregroundColor(.white)
+                        }
+                        .padding(24)
+                        .background(Color(white: 0.15))
+                        .cornerRadius(12)
                     }
-                    
-                    ChatInputBar(
-                        onSubmit: { query in submitQuery(query) },
-                        onImageSelected: { image in handleImageSelection(image) },
-                        onManualTap: { toggleManualMode() },
-                        isManualMode: isManualEntry
-                    )
-                    .padding(.bottom, 10) // Lift slightly from edge
+                    .zIndex(10)
+                    .transition(.opacity)
                 }
-                .zIndex(3)
             }
             .blur(radius: showSuccessPopup ? 10 : 0) // Blur main content when popup is active
-            .background(pitchBlack)
-            .cornerRadius(44)
-            .overlay(
-                RoundedRectangle(cornerRadius: 44)
-                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                    .ignoresSafeArea() 
-            )
+            .background(themeBackground)
+
             .ignoresSafeArea(.container, edges: .bottom) // Ensure Edge-to-Edge
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(isDarkMode ? .dark : .light)
             
             // Success Popup Overlay
             if showSuccessPopup {
@@ -162,8 +112,6 @@ struct ChatView: View {
         // Sheet for Receipt Review is top level logic
         .sheet(item: $scannedData) { data in
             // For manual entry, we might not have a selectedImage, so we check data presence primary
-            // But ScanReceiptView expects an image. We can use a dummy image or nil-handling logic.
-            // For now, let's use a placeholder if selectedImage is nil.
             ScanReceiptView(image: selectedImage ?? UIImage(), data: data) { savedReceipt in
                 // On Success: Update the existing message if we know which one
                 if let editingId = editingMessageId,
@@ -187,26 +135,264 @@ struct ChatView: View {
             }
                 .environmentObject(authManager)
         }
-        // Finance Sheet
-        .sheet(item: Binding<String?>(
-            get: { selectedMerchant },
-            set: { selectedMerchant = $0 }
-        )) { merchant in
-            FinancialSummaryView(merchant: merchant)
-                .environmentObject(authManager)
-                .presentationDetents([.fraction(0.6), .medium, .large])
-                .presentationDragIndicator(.visible)
+        // Finance Sheet (Isolated to prevent conflict)
+        .background(
+            EmptyView()
+                .sheet(item: Binding<MerchantResolution?>(
+                    get: { selectedMerchantResolution },
+                    set: { selectedMerchantResolution = $0 }
+                )) { res in
+                    FinancialSummaryView(merchantId: res.id, merchantName: res.displayName)
+                        .environmentObject(authManager)
+                        .presentationDetents([.fraction(0.6), .medium, .large])
+                        .presentationDragIndicator(.visible)
+                }
+        )
+        .onAppear { 
+            loadRecentChats()
+            // Auto-focus input on appear
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                isInputFocused = true
+            }
         }
-        .onAppear { loadRecentChats() }
+    }
+    
+    // MARK: - Extracted Subviews for Main Body
+    private var scrollableContent: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 12) {
+                    // Spacer for Header (Dynamic or Fixed?)
+                    // Header is approx 50-60pt total? Padding 8+12+24 = 44 + SafeArea.
+                    // Let's use a safe spacer 
+                    Color.clear.frame(height: 60)
+                    
+                    // Date Header
+                    Text("Today \(currentDateString)")
+                        .font(.custom("BerkeleyMono-Regular", size: 11))
+                        .foregroundStyle(.gray)
+                        .padding(.top, 16)
+                        .padding(.bottom, 8)
+                    
+                    if messages.isEmpty {
+                        welcomeView
+                    }
+                    
+                    // Messages
+                    messageList(proxy: proxy)
+                    
+                    // Scanning Progress moved to floating overlay
+                    
+                    if isLoading {
+                        typingIndicator
+                            .padding(.leading, 20)
+                            .padding(.top, 4)
+                    }
+                    
+                    // Spacer for input area - Reduced to tighten layout
+                    // Spacer for input area - Reduced to tighten layout
+                    // Scanning Progress (In-flow)
+                    scanningProgressSection
+                    
+                    // Spacer for input area - Dynamic Height + Safety Buffer
+                    Color.clear.frame(height: inputOverlayHeight + 120).id("BOTTOM")
+                }
+                .padding(.bottom, 0)
+            }
+            .background(themeBackground)
+            .ignoresSafeArea() // True Full Screen
+            .onChange(of: messages.count) { _ in
+                // Delay slightly to allow layout to settle
+                Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
+                    await MainActor.run {
+                        withAnimation {
+                            if let last = messages.last, last.receiptData != nil {
+                                // For receipts, scroll to show the top of the message (better visibility)
+                                // We target the message ID directly
+                                proxy.scrollTo(last.id, anchor: .center)
+                            } else {
+                                proxy.scrollTo("BOTTOM", anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+            }
+            .onChange(of: isLoading) { _ in
+                // Scroll when loading state changes (typing indicator appears/disappears)
+                Task {
+                    try? await Task.sleep(nanoseconds: 150_000_000) // 0.15s
+                    await MainActor.run {
+                        withAnimation {
+                            proxy.scrollTo("BOTTOM", anchor: .bottom)
+                        }
+                    }
+                }
+            }
+            .onChange(of: scanningSteps.count) { _ in
+                 withAnimation { proxy.scrollTo("BOTTOM", anchor: .bottom) }
+            }
+            .onChange(of: scrollTrigger) { _ in
+                // Explicit scroll trigger - longer delay for suggested question taps
+                Task {
+                    try? await Task.sleep(nanoseconds: 400_000_000) // 0.4s - wait for layout
+                    await MainActor.run {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            proxy.scrollTo("BOTTOM", anchor: .bottom)
+                        }
+                    }
+                }
+            }
+        }
+        .zIndex(0)
+        .onTapGesture {
+            // Dimiss Keyboard on Tap
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+    }
+    
+    private var inputOverlay: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            
+            VStack(spacing: 0) {
+                // Specific placement for Scanning Progress: Moved to ScrollView
+                
+                ChatInputBar(
+                    onSubmit: { query in submitQuery(query) },
+                    onImageSelected: { image in handleImageSelection(image) },
+                    onManualTap: { toggleManualMode() },
+                    onInsightsTap: { showHealthOverview = true },
+
+                    isManualMode: isManualEntry,
+                    isDarkMode: isDarkMode,
+                    isFocused: $isInputFocused
+                )
+                .padding(.bottom, 10) // Lift slightly from edge
+            }
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: HeightPreferenceKey.self, value: geo.size.height)
+                }
+            )
+            .onPreferenceChange(HeightPreferenceKey.self) { newHeight in
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        self.inputOverlayHeight = newHeight
+                    }
+                }
+            }
+            // Prevent tap-through on the input area
+            .contentShape(Rectangle()) 
+        }
+    }
+    
+    private var toastOverlay: some View {
+        VStack {
+            if showCopyToast {
+                VStack {
+                    Spacer()
+                    Text("Copied to Clipboard")
+                        .font(.custom("FKGroteskTrial-Medium", size: 14))
+                        .foregroundColor(.white)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 24)
+                        .background(Color.black.opacity(0.8))
+                        .clipShape(Capsule())
+                        .shadow(radius: 10)
+                        .padding(.bottom, 120) // Above input bar
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+        }
+    }
+    
+    // Helper Views to reduce complexity
+    private func messageList(proxy: ScrollViewProxy) -> some View {
+        ForEach(messages) { message in
+            MessageBubble(
+                message: message,
+                onFeedback: { isPositive in
+                    sendFeedback(message: message, isPositive: isPositive)
+                },
+                onSuggestionTap: { suggestion in
+                    submitQuery(suggestion)
+                    // Trigger explicit scroll after suggestion tap
+                    scrollTrigger += 1
+                },
+                onEditReceipt: { data in
+                    // Trigger the sheet with existing data
+                    self.scannedData = data
+                    self.selectedImage = data.originalImage // Might be nil, but View handles it
+                    self.editingMessageId = message.id
+                },
+                onAnimationEnd: {
+                    handleAnimationEnd(for: message.id)
+                },
+                onMerchantTap: { merchantName in
+                    // Start Resolution
+                    Task {
+                         await MainActor.run { 
+                             self.isResolvingMerchant = true 
+                             self.resolvingMerchantName = merchantName
+                         }
+                         
+                         do {
+                             if let token = authManager.token {
+                                 let resolution = try await APIClient.shared.resolveMerchant(name: merchantName, token: token)
+                                 await MainActor.run {
+                                     self.selectedMerchantResolution = resolution
+                                     self.isResolvingMerchant = false
+                                     self.resolvingMerchantName = nil
+                                 }
+                             }
+                         } catch {
+                             print("❌ Failed to resolve merchant: \(error)")
+                             await MainActor.run {
+                                 self.isResolvingMerchant = false
+                                 self.resolvingMerchantName = nil
+                                 // Show specific error for debugging
+                                 self.messages.append(ChatMessage(content: "Error: \(error.localizedDescription)", isUser: false))
+                             }
+                         }
+                    }
+                },
+                onUpdate: {
+                    // Scroll to bottom during typing
+                    proxy.scrollTo("BOTTOM", anchor: .bottom)
+                },
+                onCopy: { content in
+                    handleCopy(content)
+                },
+                isDarkMode: isDarkMode,
+                onRegenerate: {
+                    regenerateAnswer(for: message)
+                }
+            )
+            .id(message.id)
+        }
+    }
+    
+    private var scanningProgressSection: some View {
+        Group {
+            if !scanningSteps.isEmpty {
+                ScanningProgressView(steps: scanningSteps, isDarkMode: isDarkMode)
+                    .padding(.top, 8)
+                    .padding(.horizontal, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .id("SCANNING_PROGRESS")
+            }
+        }
     }
     
     // ... Subviews Definitions
     
     struct ScanningProgressView: View {
         let steps: [String]
+        var isDarkMode: Bool = true // Theme Prop
         
         var body: some View {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 // Progress Bar
                 // Progress Bar Row with Animated Logo
                 HStack(spacing: 12) {
@@ -217,8 +403,8 @@ struct ChatView: View {
                         ZStack(alignment: .leading) {
                             // Track
                             Capsule()
-                                .fill(Color.white.opacity(0.1))
-                                .frame(height: 6)
+                                .fill((isDarkMode ? Color.white : Color.gray).opacity(isDarkMode ? 0.1 : 0.2))
+                                .frame(height: 10)
                             
                             // Indicator
                             Capsule()
@@ -229,35 +415,34 @@ struct ChatView: View {
                                         endPoint: .trailing
                                     )
                                 )
-                                .frame(width: geometry.size.width * (Double(steps.count) / 6.0), height: 6)
+                                .frame(width: min(geometry.size.width, geometry.size.width * (Double(steps.count) / 8.0)), height: 10)
                                 .animation(.spring(response: 0.5, dampingFraction: 0.7), value: steps.count)
                         }
                     }
-                    .frame(height: 6)
+                    .frame(height: 10)
                 }
                 .padding(.horizontal, 16)
                 
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                    if let activeStep = steps.last {
                         HStack(spacing: 12) {
-                            if index < steps.count - 1 {
-                                 Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
-                            } else {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                    .tint(.white)
-                            }
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .tint(isDarkMode ? .white : .black)
                             
-                            Text(step)
+                            Text(activeStep)
                                 .font(.custom("FKGroteskTrial-Regular", size: 14))
-                                .foregroundColor(.white)
+                                .foregroundColor(isDarkMode ? .white : .black)
                         }
                         .padding(.vertical, 8)
                         .padding(.horizontal, 16)
-                        .background(Color(white: 0.15))
+                        .background(isDarkMode ? Color(white: 0.12) : .white)
                         .clipShape(Capsule())
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .id(activeStep) // Triggers transition on change
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        ))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -389,7 +574,10 @@ struct ChatView: View {
             "Reading Line Items",
             "Calculating Total Amount",
             "Categorizing Products",
-            "Checking for Anomalies"
+            "Checking for Anomalies",
+            "Structuring for Preview",
+            "Finalising and Previewing",
+            "Processing Complete"
         ]
         
         let resizedImage = image.resized(toMaxDimension: 1200)
@@ -445,6 +633,7 @@ struct ChatView: View {
                 await MainActor.run {
                     self.isProcessingImage = false
                     self.scanningSteps = [] // Clear steps (vanish)
+                    self.isInputFocused = false // Ensure keyboard stays collapsed
                     self.showSuccessPopup = true // Show Success
                     
                     // Delay hiding popup and showing result
@@ -460,6 +649,7 @@ struct ChatView: View {
                                 receiptData: receipt,
                                 style: .success
                             ))
+                            self.isInputFocused = false // Ensure keyboard is closed
                         }
                     }
                 }
@@ -468,6 +658,7 @@ struct ChatView: View {
                     isFinished = true
                     self.isProcessingImage = false
                     self.scanningSteps = []
+                    self.isInputFocused = false
                     messages.append(ChatMessage(content: "❌ Error: \(error.localizedDescription)", isUser: false))
                 }
             }
@@ -494,6 +685,12 @@ struct ChatView: View {
         guard !trimmed.isEmpty else { return }
         
         let userMsg = ChatMessage(content: trimmed, isUser: true)
+        
+        // Clear suggestions from all previous messages
+        for index in messages.indices {
+            messages[index].suggestedQuestions = nil
+        }
+        
         withAnimation {
             messages.append(userMsg)
             isLoading = true
@@ -505,9 +702,75 @@ struct ChatView: View {
              return
         }
         
+        // Perform standard request
+        performAIRequest(question: trimmed, isRetry: false)
+    }
+    
+    private func regenerateAnswer(for message: ChatMessage) {
+        // 1. Find the index of this AI message
+        guard let index = messages.firstIndex(where: { $0.id == message.id }) else { return }
+        
+        // 2. Find the *preceding* User message to get the question
+        // We look backwards from index
+        var questionText: String?
+        for i in stride(from: index - 1, through: 0, by: -1) {
+            if messages[i].isUser {
+                questionText = messages[i].content
+                break
+            }
+        }
+        
+        guard let originalQuestion = questionText else {
+            print("❌ Could not find original question for regeneration.")
+            return
+        }
+        
+        print("🔄 Regenerating answer for: '\(originalQuestion)'")
+        
+        // 3. Remove the bad AI result from UI
+        withAnimation {
+            messages.remove(at: index)
+            isLoading = true
+        }
+        
+        // 4. Submit with isRetry: true
+        // Note: The history sent to backend includes messages *up to* the current point.
+        // Since we removed the AI message, `messages` now ends with the User message (usually).
+        performAIRequest(question: originalQuestion, isRetry: true)
+    }
+
+    private func performAIRequest(question: String, isRetry: Bool) {
         Task {
+            let requestId = UUID().uuidString.prefix(8)
+            let start = Date()
+            print("🚀 [Req: \(requestId)] Starting AI Request (Retry: \(isRetry)). Text Length: \(question.count)")
+            
             do {
-                let history = messages.dropLast().compactMap { msg -> [String: Any]? in
+                // Limit history to last 10 messages to prevent payload bloat/timeout
+                // Important: If isRetry is true, we have already removed the "bad" AI response from `messages`.
+                // So `messages` should look correct (ending in the user prompt).
+                let historyToUse = messages.suffix(10) // Use suffix, but check if we need to drop *current* pending user msg?
+                                                       // Actually, submitQuery appends User Msg, then calls this.
+                                                       // generateAnswer removes AI msg, so User Msg is last.
+                                                       // So taking suffix(10) is correct.
+                                                       // But wait, the backend typically expects history *excluding* the current question if we send "question" param?
+                                                       // Or does it expect "question" to be the *newest* thing and history is context?
+                                                       // Standard pattern: History contains previous turns. "question" is the current turn.
+                                                       // If `messages` includes the current User Question (which it does), we should probably EXCLUDE it from history
+                                                       // to avoid duplication if the backend appends "question" to context.
+                                                       // Let's check previous code: `messages.dropLast().suffix(10)`.
+                                                       // Ah, previous code: `historyToUse = messages.dropLast().suffix(10)`.
+                                                       // It DROPPED the last message (User's new prompt) from history, and sent it as "question".
+                                                       // Correct.
+                
+                let historyMessages = messages.dropLast() // Exclude the very last item (which is the current User prompt)
+                
+                // Safety: If for some reason messages is empty (shouldn't be), handle it.
+                let historySlice = historyMessages.suffix(10)
+                
+                print("📜 [Req: \(requestId)] History Count: \(historySlice.count)")
+                
+                let history = historySlice.compactMap { msg -> [String: Any]? in
                     var dict: [String: Any] = [
                         "role": msg.isUser ? "user" : "ai",
                         "text": msg.content
@@ -532,10 +795,24 @@ struct ChatView: View {
                     return dict
                 }
                 
-                let body: [String: Any] = ["question": trimmed, "history": history]
-                let bodyData = try JSONSerialization.data(withJSONObject: body)
+                var body: [String: Any] = ["question": question, "history": history]
+                if isRetry {
+                    body["isRetry"] = true
+                }
                 
-                let (data, _) = try await APIClient.shared.rawRequest(path: "/api/ask-ai", method: "POST", body: bodyData, token: authManager.token)
+                let bodyData = try JSONSerialization.data(withJSONObject: body)
+                print("📦 [Req: \(requestId)] Payload Size: \(ByteCountFormatter.string(fromByteCount: Int64(bodyData.count), countStyle: .file))")
+                
+                let (data, response) = try await APIClient.shared.rawRequest(path: "/api/ask-ai", method: "POST", body: bodyData, token: authManager.token)
+                
+                let duration = Date().timeIntervalSince(start)
+                print("✅ [Req: \(requestId)] Success! Duration: \(String(format: "%.2f", duration))s. Response Size: \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))")
+                
+                // Inspect Response Code if available
+                if let httpResponse = response as? HTTPURLResponse {
+                     print("📡 [Req: \(requestId)] Status Code: \(httpResponse.statusCode)")
+                }
+                
                 let aiResponse = try JSONDecoder().decode(AskAIResponse.self, from: data)
                 
                 await MainActor.run {
@@ -545,10 +822,13 @@ struct ChatView: View {
                     }
                 }
             } catch {
+                let duration = Date().timeIntervalSince(start)
+                print("❌ [Req: \(requestId)] Failed after \(String(format: "%.2f", duration))s. Error: \(error)")
+                
                 await MainActor.run {
                     withAnimation {
                         isLoading = false
-                        messages.append(ChatMessage(content: "Sorry, something went wrong.", isUser: false))
+                        messages.append(ChatMessage(content: "Sorry, something went wrong. (Debug: \(error.localizedDescription))", isUser: false))
                     }
                 }
             }
@@ -592,6 +872,12 @@ struct ChatView: View {
             // Only update if it was animating to prevent unnecessary writes
             if messages[index].shouldAnimate {
                 messages[index].shouldAnimate = false
+                
+                // If this is the last message, trigger a scroll to reveal suggestions
+                // We add a slight delay via the existing scrollTrigger mechanism
+                if index == messages.count - 1 {
+                    scrollTrigger += 1
+                }
             }
         }
     }
@@ -603,7 +889,19 @@ struct ChatView: View {
     }
     
     private func hideKeyboard() {
+        isInputFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+    
+    private func handleCopy(_ content: String) {
+        UIPasteboard.general.string = content
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        
+        withAnimation { showCopyToast = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation { showCopyToast = false }
+        }
     }
     
 }
@@ -624,10 +922,19 @@ extension ChatView {
                 HStack(spacing: 0) {
                     // Left: Profile & Menu
                     Menu {
+                        // Theme Toggle
+                        Button(action: {
+                            isDarkMode.toggle()
+                        }) {
+                            Image(systemName: isDarkMode ? "sun.max" : "moon")
+                        }
+                        
+                        Divider()
+                        
                         Button(role: .destructive, action: {
                             authManager.logout()
                         }) {
-                            Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
                         }
                     } label: {
                         HStack(spacing: 12) {
@@ -640,7 +947,7 @@ extension ChatView {
                                             .aspectRatio(contentMode: .fill)
                                             .frame(width: 32, height: 32)
                                             .clipShape(Circle())
-                                            .overlay(Circle().stroke(Color.white.opacity(0.1), lineWidth: 1))
+                                            .overlay(Circle().stroke(themeText.opacity(0.1), lineWidth: 1))
                                     } else {
                                         Circle()
                                             .fill(Color.gray.opacity(0.3))
@@ -665,7 +972,7 @@ extension ChatView {
                                 
                                 Text(authManager.user?.fullName ?? authManager.user?.bestDisplayName ?? "User")
                                     .font(.custom("FKGroteskTrial-Medium", size: 14)) // Reduced from 16
-                                    .foregroundColor(.white)
+                                    .foregroundColor(themeText)
                             }
                         }
                         .padding(.leading, 16)
@@ -682,7 +989,7 @@ extension ChatView {
                     }) {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 20, weight: .regular))
-                            .foregroundColor(.white)
+                            .foregroundColor(themeText)
                     }
                     .padding(.trailing, 16)
                 }
@@ -693,7 +1000,7 @@ extension ChatView {
             .padding(.top, 8)
             .padding(.bottom, 12)
         }
-        .background(headerBlack)
+        .background(themeHeaderBackground)
     }
     
     private var currentGreeting: String {
@@ -718,13 +1025,16 @@ extension ChatView {
             // Tagline
             Text("")
                 .font(.custom("FKGroteskTrial-Regular", size: 14))
-                .foregroundColor(.white.opacity(0.4)) // Slightly dimmer to match logo
+                .foregroundColor(themeText.opacity(0.4)) // Slightly dimmer to match logo
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
             
             Spacer()    
         }
         .frame(maxWidth: .infinity)
+        .sheet(isPresented: $showHealthOverview) {
+            HealthOverviewView()
+        }
     }
 
 
@@ -736,31 +1046,30 @@ struct ChatInputBar: View {
     var onSubmit: (String) -> Void
     var onImageSelected: (UIImage) -> Void
     var onManualTap: () -> Void
+    var onInsightsTap: () -> Void
+
     var isManualMode: Bool // NEW
+    var isDarkMode: Bool // For Theme
+    
+    // Binding to Parent Focus State
+    var isFocused: FocusState<Bool>.Binding
     
     @State private var prompt: String = ""
     @State private var showCamera = false
     @State private var showPhotoLibrary = false
     
-    @FocusState private var isFocused: Bool // Auto-Focus State
-    
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 // 1. Text Field Area
-                TextField("Ask Anything Or   Scan Receipt", text: $prompt)
+                TextField("Ask Anything...", text: $prompt)
                     .font(.custom("FKGroteskTrial-Regular", size: 16))
                     .padding(.horizontal, 4)
                     .padding(.top, 4)
-                    .foregroundColor(.white)
-                    .accentColor(.white)
+                    .foregroundColor(isDarkMode ? .white : .black)
+                    .accentColor(isDarkMode ? .white : .black)
                     .submitLabel(.send)
-                    .focused($isFocused)
-                    .task {
-                        // Delay slightly to allow transition to finish
-                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
-                        isFocused = true
-                    }
+                    .focused(isFocused)
                 
                 // 2. Action Row (Below Text)
                 HStack(spacing: 2) {
@@ -768,7 +1077,7 @@ struct ChatInputBar: View {
                     Button(action: {}) {
                         Image(systemName: "plus")
                             .font(.system(size: 20, weight: .regular))
-                            .foregroundColor(.gray)
+                            .foregroundColor(isDarkMode ? .gray : .black)
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
@@ -777,7 +1086,7 @@ struct ChatInputBar: View {
                     Button(action: { showCamera = true }) {
                         Image(systemName: "camera")
                             .font(.system(size: 18, weight: .regular))
-                            .foregroundColor(.gray)
+                            .foregroundColor(isDarkMode ? .gray : .black)
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
@@ -786,7 +1095,7 @@ struct ChatInputBar: View {
                     Button(action: { showPhotoLibrary = true }) {
                         Image(systemName: "photo")
                             .font(.system(size: 18, weight: .regular))
-                            .foregroundColor(.gray)
+                            .foregroundColor(isDarkMode ? .gray : .black)
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
@@ -795,10 +1104,20 @@ struct ChatInputBar: View {
                     Button(action: { onManualTap() }) {
                         Image(systemName: isManualMode ? "keyboard.fill" : "keyboard")
                             .font(.system(size: 18, weight: .regular))
-                            .foregroundColor(isManualMode ? Color(hex: "FF4500") : .gray) // Fire Orange if active
+                            .foregroundColor(isManualMode ? .blue : (isDarkMode ? .gray : .black))
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
+                    
+                    // Health Insights
+                    Button(action: { onInsightsTap() }) {
+                        Image(systemName: "chart.bar.xaxis")
+                            .font(.system(size: 18, weight: .regular))
+                            .foregroundColor(isDarkMode ? .gray : .black)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+
                     
                     Spacer()
                     
@@ -811,22 +1130,22 @@ struct ChatInputBar: View {
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.blue)
                             .frame(width: 32, height: 32)
-                            .background(prompt.isEmpty ? Color.gray.opacity(0.3) : Color.white)
+                            .background(prompt.isEmpty ? Color.gray.opacity(0.3) : (isDarkMode ? Color.white : Color.black))
                             .clipShape(Circle())
                     }
                     .disabled(prompt.isEmpty)
                 }
             }
             .padding(12)
-            .background(Color.white.opacity(0.02)) // 99% Transparent
-            // .background(.ultraThinMaterial) // Removed to achieve transparency
+            .background(isDarkMode ? Color.white.opacity(0.05) : Color.black.opacity(0.05)) // Dynamic Tint
+            .background(.ultraThinMaterial) // Frosty Glass Effect
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(LinearGradient(
                         colors: [
-                            .white.opacity(0.6), // Specular Top-Left
-                            .white.opacity(0.2), 
-                            .white.opacity(0.05) // Faded Bottom-Right
+                            (isDarkMode ? Color.white : Color.black).opacity(0.6), // Specular Top-Left
+                            (isDarkMode ? Color.white : Color.black).opacity(0.2), 
+                            (isDarkMode ? Color.white : Color.black).opacity(0.05) // Faded Bottom-Right
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -862,6 +1181,12 @@ struct MessageBubble: View {
     var onEditReceipt: ((ReceiptData) -> Void)? = nil
     var onAnimationEnd: (() -> Void)? = nil
     var onMerchantTap: ((String) -> Void)? = nil
+    var onUpdate: (() -> Void)? = nil
+    var onCopy: ((String) -> Void)? = nil
+    var isDarkMode: Bool = true
+
+    // Callback for regenerate
+    var onRegenerate: (() -> Void)? = nil
 
     @State private var feedbackGiven: Bool? = nil // nil, true (good), false (bad)
     @State private var isTypingFinished = false
@@ -883,25 +1208,32 @@ struct MessageBubble: View {
                                 .frame(maxWidth: .infinity, alignment: .center) // Center Image
                         }
                         
-                        Text(message.content)
-                            .font(.custom("FKGroteskTrial-Regular", size: 17))
-                            .foregroundColor(message.style == .success ? .white : (message.style == .error ? Color(hex: "FF3B30") : .white.opacity(0.9)))
-                            .fixedSize(horizontal: false, vertical: true)
+                        if !message.content.isEmpty {
+                            Text(message.content)
+                                .font(.custom("FKGroteskTrial-Regular", size: 15))
+                                .foregroundColor(message.style == .success ? .white : (message.style == .error ? Color(hex: "FF3B30") : (isDarkMode ? .white.opacity(0.9) : .black)))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         
                         // Receipt Table (Restored for User Bubble)
                         if let receiptData = message.receiptData {
-                            ReceiptTableView(data: receiptData) {
-                                onEditReceipt?(receiptData)
-                            }
+                            ReceiptTableView(
+                                data: receiptData,
+                                onEdit: { onEditReceipt?(receiptData) },
+                                isDarkMode: isDarkMode
+                            )
                             .frame(width: 280) // Keep width constrained for bubble
                             .padding(.top, 4)
                         }
                     }
                     .padding(.vertical, 12)
                     .padding(.horizontal, 16)
-                    .background(message.style == .success ? Color(hex: "56CCF2") : Color(white: 0.15))
+                    .background(message.style == .success ? Color(hex: "56CCF2") : (isDarkMode ? Color(white: 0.12) : .white))
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .trailing)
+                    .onLongPressGesture(minimumDuration: 0.3) {
+                        onCopy?(message.content)
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12) // Spacing after user message
@@ -913,29 +1245,33 @@ struct MessageBubble: View {
                     // 1. Main Content Text (Full width)
                     if message.receiptData == nil {
                         if message.shouldAnimate {
-                            TypewriterText(fullText: message.content, speed: 0.015) {
+                            TypewriterText(fullText: message.content, speed: 0.015, onComplete: {
                                 withAnimation {
                                     isTypingFinished = true
                                     onAnimationEnd?()
                                 }
-                            }
+                            }, onUpdate: {
+                                onUpdate?()
+                            }, isDarkMode: isDarkMode)
                             .environment(\.openURL, OpenURLAction { url in
                                 if url.scheme == "merchant" {
-                                    let merchantName = url.absoluteString.replacingOccurrences(of: "merchant://", with: "")
+                                    let rawName = url.absoluteString.replacingOccurrences(of: "merchant://", with: "")
+                                    let merchantName = rawName.removingPercentEncoding ?? rawName
                                     onMerchantTap?(merchantName)
                                     return .handled
                                 }
                                 return .systemAction
                             })
                         } else {
-                            Text(TextFormatter.format(message.content))
-                                .font(.custom("FKGroteskTrial-Regular", size: 17)) // Reverted to FK Grotesk
-                                .foregroundColor(.white.opacity(0.95))
+                            Text(TextFormatter.format(message.content, isDarkMode: isDarkMode))
+                                .font(.custom("FKGroteskTrial-Regular", size: 15)) // Reverted to FK Grotesk
+                                .foregroundColor(isDarkMode ? .white.opacity(0.95) : .black.opacity(0.9))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .environment(\.openURL, OpenURLAction { url in
                                     if url.scheme == "merchant" {
-                                        let merchantName = url.absoluteString.replacingOccurrences(of: "merchant://", with: "")
+                                        let rawName = url.absoluteString.replacingOccurrences(of: "merchant://", with: "")
+                                        let merchantName = rawName.removingPercentEncoding ?? rawName
                                         onMerchantTap?(merchantName)
                                         return .handled
                                     }
@@ -981,13 +1317,19 @@ struct MessageBubble: View {
                         Spacer()
                         
                         // Mock Tools (Copy, Share) - Visual only for now as requested by style
-                        Button(action: {}) {
+                        Button(action: {
+                             onCopy?(message.content) // Re-use copy handler
+                        }) {
                             Image(systemName: "square.on.square")
                                 .font(.system(size: 16))
                                 .foregroundColor(.gray)
                         }
                         
-                        Button(action: {}) {
+                        // Regenerate Button
+                        Button(action: {
+                            triggerHaptic(style: .medium)
+                            onRegenerate?()
+                        }) {
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .font(.system(size: 16))
                                 .foregroundColor(.gray)
@@ -1006,10 +1348,10 @@ struct MessageBubble: View {
                                     }) {
                                         Text(suggestion)
                                             .font(.custom("FKGroteskTrial-Regular", size: 15)) // Match User Font
-                                            .foregroundStyle(Color.white.opacity(0.9))
+                                            .foregroundStyle(isDarkMode ? Color.white.opacity(0.9) : .black)
                                             .padding(.vertical, 12)
                                             .padding(.horizontal, 16)
-                                            .background(Color(white: 0.15)) // Match User Bubble or similar
+                                            .background(isDarkMode ? Color(white: 0.12) : .white) // Match User Bubble or similar
                                             .clipShape(Capsule()) // Pill Shape
                                     }
                                 }
@@ -1017,6 +1359,7 @@ struct MessageBubble: View {
                             .frame(maxWidth: .infinity, alignment: .trailing) // Force right alignment
                             .padding(.top, 8)
                             .transition(.opacity)
+                            .id("SUGGESTIONS_\(message.id)")
                         }
                     }
                 }
@@ -1141,43 +1484,58 @@ struct TypewriterText: View {
     let fullText: String
     let speed: Double // Seconds per character
     var onComplete: (() -> Void)? = nil
+    var onUpdate: (() -> Void)? = nil
+    var isDarkMode: Bool = true // Theme Prop
     
     @State private var displayedText: String = ""
     @State private var timer: Timer?
     
-    // We need to access the styling function. Since it's in ChatView, we can replicate it or move it out.
-    // For simplicity, let's duplicate the styling logic here or pass an attributed string builder closure.
-    // Better yet, let's make the styling function static or standalone if possible.
-    // Given the constraints, I will copy the styling logic here to ensure it works autonomously.
+    // We need to access the styling function.
+    // ... (comments kept)
     
+        // TypewriterText body
     var body: some View {
-        Text(TextFormatter.format(displayedText))
+        Text(TextFormatter.format(displayedText, isDarkMode: isDarkMode))
             .font(.custom("FKGroteskTrial-Regular", size: 15))
-            .foregroundColor(.white.opacity(0.95))
+            .foregroundColor(isDarkMode ? .white.opacity(0.95) : .black.opacity(0.9))
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .onAppear {
                 startTyping()
             }
+            .onDisappear {
+                timer?.invalidate()
+                timer = nil
+            }
             .onChange(of: fullText) { newValue in
-                // If text changes (e.g. streaming update), handled differently.
-                // For this use case (post-generation typing), we just reset.
                 displayedText = ""
                 startTyping()
             }
     }
     
     private func startTyping() {
+        // Invalidate existing timer if any
+        timer?.invalidate()
+        
         guard displayedText.count < fullText.count else { return }
         displayedText = ""
         
         // Timer-based typing
-        Timer.scheduledTimer(withTimeInterval: speed, repeats: true) { timer in
+        timer = Timer.scheduledTimer(withTimeInterval: speed, repeats: true) { timer in
+            // Handle timer logic
+            // Note: We use 'timer' from closure to avoid self-capture cycles if we used self.timer
+            // But we need to capture self for displayedText/onUpdate
+            
             if displayedText.count < fullText.count {
                 let index = fullText.index(fullText.startIndex, offsetBy: displayedText.count)
                 displayedText.append(fullText[index])
                 
-                // Haptic Feedback
+                // Trigger update callback ALWAYS
+                DispatchQueue.main.async { 
+                    onUpdate?() 
+                }
+                
+                // Haptic Feedback (every 3 chars)
                 if displayedText.count % 3 == 0 {
                     let generator = UIImpactFeedbackGenerator(style: .light)
                     generator.impactOccurred()
@@ -1255,4 +1613,11 @@ struct RecentChat: Codable, Identifiable {
 #Preview {
     ChatView()
         .environmentObject(AuthManager())
+}
+
+struct HeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }

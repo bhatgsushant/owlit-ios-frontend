@@ -10,7 +10,15 @@ import SwiftUI
 struct ReceiptTableView: View {
     let data: ReceiptData
     var onEdit: (() -> Void)? = nil
+    var isDarkMode: Bool = true
     
+    // Computed Colors to fix compiler timeout
+    private var textPrimary: Color { isDarkMode ? .white : .black }
+    private var bgMain: Color { isDarkMode ? Color(hex: "111111") : Color(uiColor: .systemGray6) }
+    private var bgOverlay: Color { (isDarkMode ? Color.white : Color.black).opacity(0.05) }
+    private var strokeColor: Color { (isDarkMode ? Color.white : Color.black).opacity(0.1) }
+    private var iconBg: Color { (isDarkMode ? Color.white : Color.black).opacity(0.1) }
+
     var body: some View {
         VStack(spacing: 0) {
             // MARK: - Receipt Header
@@ -22,26 +30,24 @@ struct ReceiptTableView: View {
                              if let image = phase.image {
                                  image.resizable().aspectRatio(contentMode: .fit)
                              } else if phase.error != nil || merchant.isEmpty {
-                                 // Fallback
                                  ZStack {
                                      Circle().fill(Color.gray.opacity(0.1))
                                      Text(merchant.prefix(1).uppercased())
                                          .font(.custom("FKGroteskTrial-Bold", size: 10))
-                                         .foregroundColor(.white)
+                                         .foregroundColor(textPrimary)
                                  }
                              } else {
-                                 // Loading - keep it subtle
                                  Color.clear
                              }
                          }
                          .frame(width: 20, height: 20)
-                         .background(Color.white.opacity(0.1))
+                         .background(iconBg)
                          .clipShape(Circle())
                         
                         Text(merchant.uppercased())
                             .font(.custom("FKGroteskTrial-Bold", size: 14))
-                            .foregroundColor(.white)
-                            .tracking(1) // Letter spacing
+                            .foregroundColor(textPrimary)
+                            .tracking(1)
                     }
                 }
                 
@@ -50,17 +56,32 @@ struct ReceiptTableView: View {
                         .font(.custom("BerkeleyMono-Regular", size: 11))
                         .foregroundColor(.gray)
                 }
+                
+                // Potential Duplicate Badge
+                if data.isPotentialDuplicate == true {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                        Text("Duplicate?")
+                            .font(.custom("FKGroteskTrial-Medium", size: 10))
+                    }
+                    .foregroundColor(Color.blue)
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 6)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(4)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
-            .background(Color.white.opacity(0.05))
+            .background(bgOverlay)
             .overlay(
                 Button(action: { onEdit?() }) {
                     Image(systemName: "pencil")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.7))
+                        .foregroundColor(textPrimary.opacity(0.7))
                         .padding(8)
-                        .contentShape(Rectangle()) // Easier touch target
+                        .contentShape(Rectangle())
                 }
                 .padding(.trailing, 4),
                 alignment: .topTrailing
@@ -70,12 +91,9 @@ struct ReceiptTableView: View {
             
             // Header
             HStack {
-                Text("Item")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Qty")
-                    .frame(width: 30)
-                Text("Price")
-                    .frame(width: 60, alignment: .trailing)
+                Text("Item").frame(maxWidth: .infinity, alignment: .leading)
+                Text("Qty").frame(width: 30)
+                Text("Price").frame(width: 60, alignment: .trailing)
             }
             .font(.system(size: 11, weight: .bold))
             .foregroundColor(.gray)
@@ -87,11 +105,11 @@ struct ReceiptTableView: View {
             
             // Rows
             ForEach(data.lineItems) { item in
-                HStack(alignment: .top) { // Top alignment for multi-line
+                HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.item)
                             .font(.custom("FKGroteskTrial-Regular", size: 13))
-                            .foregroundColor(.white)
+                            .foregroundColor(textPrimary)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                         
@@ -101,7 +119,7 @@ struct ReceiptTableView: View {
                                 Text(main.capitalized)
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 2)
-                                    .background(Color.white.opacity(0.1))
+                                    .background(iconBg)
                                     .cornerRadius(4)
                             }
                             
@@ -109,12 +127,12 @@ struct ReceiptTableView: View {
                                 Text(sub.capitalized)
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 2)
-                                    .background(Color.white.opacity(0.05))
+                                    .background(bgOverlay)
                                     .cornerRadius(4)
                             }
                         }
                         .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.white.opacity(0.9))
+                        .foregroundColor(textPrimary.opacity(0.9))
                         .padding(.top, 2)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -123,11 +141,11 @@ struct ReceiptTableView: View {
                         .font(.custom("BerkeleyMono-Regular", size: 13))
                         .foregroundColor(.gray)
                         .frame(width: 30)
-                        .padding(.top, 2) // Align with item text
+                        .padding(.top, 2)
                     
                     Text(String(format: "%.2f", item.price ?? 0.0))
                         .font(.custom("BerkeleyMono-Regular", size: 13))
-                        .foregroundColor(.white)
+                        .foregroundColor(textPrimary)
                         .frame(width: 60, alignment: .trailing)
                         .padding(.top, 2)
                 }
@@ -137,7 +155,7 @@ struct ReceiptTableView: View {
                 if item.id != data.lineItems.last?.id {
                      Divider().background(Color.gray.opacity(0.2))
                 }
-            } // End ForEach
+            }
             
             Divider().background(Color.gray.opacity(0.3))
             
@@ -145,22 +163,23 @@ struct ReceiptTableView: View {
             HStack {
                 Text("Total")
                     .font(.custom("FKGroteskTrial-Bold", size: 13))
-                    .foregroundColor(.white)
+                    .foregroundColor(textPrimary)
                 Spacer()
                 Text(String(format: "£%.2f", data.totalAmount ?? 0.0))
                     .font(.custom("BerkeleyMono-Regular", size: 14))
                     .foregroundColor(Color(hex: "27A565"))
             }
             .padding(12)
-            .background(Color.white.opacity(0.05))
+            .background(bgOverlay)
         }
-        .background(Color(hex: "111111"))
+        .background(bgMain)
         .cornerRadius(12)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                .stroke(strokeColor, lineWidth: 1)
         )
     }
+
     
     // Helper
     private func cleanDomain(_ name: String) -> String {

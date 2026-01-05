@@ -20,9 +20,10 @@ class AuthManager: ObservableObject {
     init() {
         if let persistedToken = keychain.read(service: KeychainHelper.service, account: KeychainHelper.account) {
             self.token = persistedToken
+            self.isAuthenticated = true // Optimistic Auth: Allow entry immediately while validating in background
         }
-
-        Task { await refreshUser() }
+        
+        Task { await refreshUser(silent: true) }
     }
 
     // MARK: - Web Authentication Flow
@@ -98,7 +99,7 @@ class AuthManager: ObservableObject {
     }
 
     /// Fetches the current user's profile from the `/api/user` endpoint.
-    func refreshUser() async {
+    func refreshUser(silent: Bool = false) async {
         if token == nil, let persisted = keychain.read(service: KeychainHelper.service, account: KeychainHelper.account) {
             self.token = persisted
         }
@@ -110,22 +111,20 @@ class AuthManager: ObservableObject {
             return
         }
         
-        isLoading = true
+        if !silent {
+            isLoading = true
+        }
         lastError = nil
-        defer { isLoading = false }
+        defer { if !silent { isLoading = false } }
 
         do {
             let (responseData, response) = try await APIClient.shared.rawRequest(path: "/api/user", token: currentToken)
             
             guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
                 let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-                let errorBody = String(data: responseData, encoding: .utf8) ?? "Non-JSON error response"
-                print("❌ /api/user non-2xx status: \(statusCode). Body: \(errorBody)")
-                throw NSError(domain: "APIError", code: statusCode, userInfo: [NSLocalizedDescriptionKey: "Failed to fetch user profile. Status: \(statusCode)"])
-            }
-            
-            if let jsonStr = String(data: responseData, encoding: .utf8) {
-                print("📥 Raw User JSON: \(jsonStr)")
+                // Silent fail on background refresh? Or log it?
+                print("❌ /api/user non-2xx status: \(statusCode)")
+                throw NSError(domain: "APIError", code: statusCode, userInfo: [NSLocalizedDescriptionKey: "Failed to fetch user profile."])
             }
             
             let fetchedUser = try JSONDecoder().decode(User.self, from: responseData)
@@ -135,11 +134,14 @@ class AuthManager: ObservableObject {
             
         } catch {
             print("❌ refreshUser failed: \(error.localizedDescription)")
-            self.isAuthenticated = false
-            self.user = nil
-            self.token = nil // If the token is invalid, clear it.
-            persistToken(nil)
-            self.lastError = "Your session has expired. Please log in again."
+            // Only logout if it's a 401/403 (Token/Auth Error). If network error, keep optimistic session?
+            // For now, let's play safe. If profile fetch fails, maybe token is dead.
+            if let nsErr = error as NSError?, nsErr.code == 401 || nsErr.code == 403 {
+                self.isAuthenticated = false
+                self.user = nil
+                self.token = nil 
+                persistToken(nil)
+            }
         }
     }
 

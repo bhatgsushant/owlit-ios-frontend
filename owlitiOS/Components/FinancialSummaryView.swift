@@ -1,13 +1,28 @@
+
 import SwiftUI
 
 struct FinancialSummaryView: View {
-    let merchant: String
+    let merchantId: String
+    let merchantName: String
+    
+    // Computed property for internal usage (display)
+    var merchant: String { resolvedMerchantName.isEmpty ? merchantName : resolvedMerchantName }
+    
     @EnvironmentObject var authManager: AuthManager
+    @Environment(\.dismiss) var dismiss
+    
+    // Init
+    init(merchantId: String, merchantName: String) {
+        self.merchantId = merchantId
+        self.merchantName = merchantName
+    }
     
     // State
     @State private var summary: MerchantSummary?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var resolvedMerchantName: String = ""
+    @State private var showGlobalAnalytics = false
     
     // MARK: - Body
     var body: some View {
@@ -23,7 +38,6 @@ struct FinancialSummaryView: View {
                 contentView(data: data)
             }
         }
-
         .task {
             await loadData()
         }
@@ -33,34 +47,30 @@ struct FinancialSummaryView: View {
     private func loadData() async {
         isLoading = true
         errorMessage = nil
+        
+        guard let token = authManager.token else {
+            errorMessage = "User not authenticated"
+            isLoading = false
+            return
+        }
+        
         do {
-            if let token = authManager.token {
-                self.summary = try await APIClient.shared.fetchMerchantSummary(merchant: merchant, token: token)
-            } else {
-                throw URLError(.userAuthenticationRequired)
-            }
+            // 1. Resolve Canonical Merchant Name from Server
+            let resolution = try await APIClient.shared.resolveMerchant(name: merchantName, token: token)
+            resolvedMerchantName = resolution.displayName
+            
+            // 2. Fetch Server-Side Aggregated Summary
+            let data = try await APIClient.shared.fetchMerchantSummary(merchant: resolution.id, token: token)
+            
+            self.summary = data
+            
         } catch {
-            print("Error loading summary: \(error)")
-            // Detailed error for debugging
-            if let decodingError = error as? DecodingError {
-                switch decodingError {
-                case .keyNotFound(let key, let context):
-                    errorMessage = "Missing key: \(key.stringValue) - \(context.debugDescription)"
-                case .typeMismatch(let type, let context):
-                    errorMessage = "Type mismatch: \(type) - \(context.debugDescription)"
-                case .valueNotFound(let type, let context):
-                    errorMessage = "Value not found: \(type) - \(context.debugDescription)"
-                case .dataCorrupted(let context):
-                    errorMessage = "Data corrupted - \(context.debugDescription)"
-                @unknown default:
-                    errorMessage = "Decoding error: \(error.localizedDescription)"
-                }
-            } else {
-                errorMessage = error.localizedDescription
-            }
+             print("Error fetching summary: \(error)")
+             errorMessage = error.localizedDescription
         }
         isLoading = false
     }
+
     
     // MARK: - Views
     
@@ -77,14 +87,14 @@ struct FinancialSummaryView: View {
                 .foregroundColor(.yellow)
             
             Text("Something went wrong")
-                .font(.headline)
-                .foregroundColor(.white)
+            .font(.headline)
+            .foregroundColor(.white)
             
             Text(message)
-                .font(.caption)
-                .foregroundColor(.gray)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
+            .font(.caption)
+            .foregroundColor(.gray)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal)
             
             Button("Try Again") {
                 Task { await loadData() }
@@ -96,21 +106,40 @@ struct FinancialSummaryView: View {
     private func contentView(data: MerchantSummary) -> some View {
         ScrollView {
             VStack(spacing: 24) {
-                // Unified Card Container
-                VStack(spacing: 12) { // Compact spacing
-                    // 1. Header with Logo
-                    headerSection(data: data)
+                // Header inside scroll view to scroll with content
+                HStack {
+                    Spacer()
                     
-                    // 2. Big Numbers (Month/Year)
+                    Button(action: {
+                        dismiss()
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundColor(Color(.systemGray4))
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 20)
+                
+                VStack(spacing: 12) {
+                    headerSection(summary: data) // Re-using header logic for logo? Layout might be redundant.
+                    // Let's hide the top header and rely on the internal card header or merge them.
+                    // The previous design had a "card" style. Let's keep the card style.
+                    
                     heroStatsSection(data: data)
                     
-                    // 3. Trend Chart
-                    trendSection(data: data)
-                    
-                    // 4. Insights Grid
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Spending Trend (12 Weeks)")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding(.horizontal)
+                        
+                        trendSection(data: data)
+                    }
+
                     insightsGrid(data: data)
                 }
-                .padding(16) // Reduced internal padding
+                .padding(16)
                 .background(
                     LinearGradient(
                         colors: [Color(hex: "0F200F"), Color.black],
@@ -119,24 +148,26 @@ struct FinancialSummaryView: View {
                     )
                 )
                 .cornerRadius(15)
-                .shadow(color: Color.black.opacity(0.5), radius: 24, x: 0, y: 12) // 3D Shadow Pop
+                .shadow(color: Color.black.opacity(0.5), radius: 24, x: 0, y: 12)
                 .overlay(
                     RoundedRectangle(cornerRadius: 15)
                         .stroke(Color.white.opacity(0.1), lineWidth: 1)
                 )
                 
-                // 5. Footer Action
                 actionButton
             }
             .padding(.horizontal, 16)
-            .padding(.top, 20)
             .padding(.bottom, 40)
         }
     }
     
+    private var displayName: String {
+        return resolvedMerchantName.isEmpty ? merchantName : resolvedMerchantName
+    }
+    
     // MARK: - Sub-Components
     
-    private func headerSection(data: MerchantSummary) -> some View {
+    private func headerSection(summary: MerchantSummary) -> some View {
         HStack(spacing: 14) {
              AsyncImage(url: URL(string: "https://img.logo.dev/\(cleanDomain(merchant))?token=pk_Sa5pkb0QQ3CfQPaZgFE7jA&size=80&retina=true")) { phase in
                 if let image = phase.image {
@@ -159,32 +190,16 @@ struct FinancialSummaryView: View {
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(data.merchant.capitalized)
-                    .font(.custom("FKGroteskTrial-Regular", size: 20).weight(.bold))
-                    .foregroundColor(.white)
-                
+                // Name handled by parent view header
                 HStack(spacing: 6) {
-                    Text(data.category)
-                        .font(.custom("FKGroteskTrial-Regular", size: 14))
-                        .foregroundColor(.gray)
-                    
-                    Circle()
-                        .fill(Color.gray)
-                        .frame(width: 3, height: 3)
-                    
-                    Text("Details")
+                    Text(summary.category)
                         .font(.custom("FKGroteskTrial-Regular", size: 14))
                         .foregroundColor(.gray)
                 } 
             }
-            
             Spacer()
-            
-            Image(systemName: "ellipsis")
-                .rotationEffect(.degrees(90))
-                .foregroundColor(.gray)
         }
-        .padding(.top, 12) // Reduced top padding
+        .padding(.top, 12)
     }
     
     private func heroStatsSection(data: MerchantSummary) -> some View {
@@ -204,14 +219,14 @@ struct FinancialSummaryView: View {
     }
     
     private func heroCard(label: String, value: String, percentChange: Double?) -> some View {
-        VStack(alignment: .leading, spacing: 6) { // Reduced spacing
+        VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.custom("FKGroteskTrial-Regular", size: 12))
                 .foregroundColor(Color(white: 0.6))
             
-            VStack(alignment: .leading, spacing: 2) { // Reduced spacing
+            VStack(alignment: .leading, spacing: 2) {
                 Text(value)
-                    .font(.system(size: 15, weight: .semibold, design: .monospaced)) // Reduced font (20 -> 15)
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
                     .foregroundColor(.white)
                 
                 if let change = percentChange {
@@ -228,108 +243,57 @@ struct FinancialSummaryView: View {
                 }
             }
         }
-        .padding(12) // Reduced padding (16 -> 12)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [Color(hex: "0F200F"), Color.black],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .cornerRadius(16)
+        .background(Color.white.opacity(0.05))
+        .cornerRadius(12)
     }
     
     private func trendSection(data: MerchantSummary) -> some View {
-        VStack(alignment: .leading, spacing: 4) { // Tighter spacing
-            if data.cleanTrendGraph.isEmpty {
+        VStack(alignment: .leading, spacing: 4) {
+            if data.trendGraph.isEmpty {
                 Text("Not enough data")
                     .font(.custom("FKGroteskTrial-Regular", size: 12))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 30)
                     .foregroundColor(.gray)
             } else {
-                let recentData = Array(data.cleanTrendGraph.suffix(7))
-                VStack(spacing: 0) { // Spacing 0 to connect chart and axis bg
-                    // Chart Area with Grid
+                let recentData = data.trendGraph // Use full graph or slice if needed
+                VStack(spacing: 0) {
                     ZStack {
-                        // Mesh Grid
-                        MeshGrid(spacing: 5)
+                        MeshGrid(spacing: 20) // adjusted spacing
                             .stroke(Color.secondary.opacity(0.3), style: StrokeStyle(lineWidth: 0.5, dash: [1, 2]))
                         
-                            // Chart
                         ChartShape(data: recentData, closed: true)
                             .fill(
                                 LinearGradient(
-                                    colors: [Color(hex: "DFFF00").opacity(0.4), Color(hex: "DFFF00").opacity(0.0)],
+                                    colors: [Color(hex: "00FF9C").opacity(0.4), Color(hex: "00FF9C").opacity(0.0)],
                                     startPoint: .top,
                                     endPoint: .bottom
                                 )
                             )
                             .overlay(
                                 ChartShape(data: recentData)
-                                    .stroke(Color(hex: "DFFF00"), lineWidth: 2)
+                                    .stroke(Color(hex: "00FF9C"), lineWidth: 2)
                             )
                         
-                        // Data Labels Overlay
-                        GeometryReader { geo in
-                            ForEach(Array(recentData.enumerated()), id: \.offset) { index, value in
-                                let maxVal = (recentData.max() ?? 1.0) * 1.1
-                                let yHeight = maxVal > 0 ? CGFloat(value / maxVal) * geo.size.height : 0
-                                let xPos = CGFloat(index) * (geo.size.width / CGFloat(max(1, recentData.count - 1)))
-                                
-                                Text(String(format: "%.0f", value))
-                                    .font(.custom("FKGroteskTrial-Regular", size: 9))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 2)
-                                    .background(Color.black.opacity(0.6))
-                                    .cornerRadius(4)
-                                    .position(x: xPos, y: geo.size.height - yHeight - 15)
-                            }
-                        }
+                        // Data Labels (Optional: Show max/min or last point)
                     }
-                    .frame(height: 160) // Reduced chart height for compactness
-                    // Removed padding to align with hero cards
+                    .frame(height: 160)
                     
-                    // X-Axis Labels with Individual Backgrounds
+                    // Simple X-Axis
                     HStack {
-                        Text("7d")
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        
+                        Text("12 weeks ago")
                         Spacer()
-                        
-                        Text("5d")
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                        
-                        Spacer()
-                        
-                        Text("3d")
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                        
-                        Spacer()
-                        
-                        Text("1d")
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
+                        Text("Today")
                     }
-                    .font(.custom("FKGroteskTrial-Regular", size: 10))
-                    .foregroundColor(Color(hex: "DFFF00"))
-                    .padding(.vertical, 8)
-                    // Removed horizontal padding to align with chart
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                    .padding(.top, 8)
                 }
                 .padding(.vertical, 8)
             }
-
         }
-        // Removed .background and .cornerRadius to "remove the card" styling
     }
     
     private func insightsGrid(data: MerchantSummary) -> some View {
@@ -365,37 +329,8 @@ struct FinancialSummaryView: View {
                 value: data.insights.topItem ?? "Unknown"
             )
             
-            // Health Score Card
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: "heart.fill")
-                        .foregroundColor(.pink)
-                    Text("HEALTH")
-                        .font(.custom("FKGroteskTrial-Regular", size: 10)) // Extra Small
-                        .foregroundColor(.gray)
-                }
-                
-                HStack(alignment: .bottom, spacing: 4) {
-                    Text("\(data.insights.healthScore.healthyPercentage)%")
-                        .font(.custom("FKGroteskTrial-Regular", size: 14).weight(.semibold)) // Smaller Value
-                        .foregroundColor(.white)
-                    Text("Good") // Shortened "Healthy" to fit
-                        .font(.custom("FKGroteskTrial-Regular", size: 8))
-                        .foregroundColor(.gray)
-                        .padding(.bottom, 2)
-                }
-            }
-            .padding(10) // Reduced Padding
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 80) // Fixed height for alignment
-            .background(
-                LinearGradient(
-                    colors: [Color(hex: "0F200F"), Color.black],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .cornerRadius(16)
+            // Health Score Card (Span 1 or custom)
+            healthScoreCard(score: data.insights.healthScore)
         }
     }
     
@@ -403,36 +338,60 @@ struct FinancialSummaryView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 10)) // Smaller Icon
+                    .font(.system(size: 10))
                     .foregroundColor(.blue)
                 Text(title)
-                    .font(.custom("FKGroteskTrial-Regular", size: 9)) // Extra Small Title
+                    .font(.custom("FKGroteskTrial-Regular", size: 9))
                     .foregroundColor(.gray)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
             
             Text(value)
-                .font(.custom("FKGroteskTrial-Regular", size: 14).weight(.semibold)) // Smaller Value Font
+                .font(.custom("FKGroteskTrial-Regular", size: 14).weight(.semibold))
                 .foregroundColor(.white)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8) // Shrink if needed (e.g. log item names)
+                .minimumScaleFactor(0.8)
         }
-        .padding(10) // Reduced Padding
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 80) // Fixed Height for alignment
-        .background(
-            LinearGradient(
-                colors: [Color(hex: "0F200F"), Color.black],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .cornerRadius(16)
+        .frame(height: 80)
+        .background(Color.white.opacity(0.05))
+        .cornerRadius(12)
     }
     
+    private func healthScoreCard(score: HealthScore) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "heart.fill")
+                    .foregroundColor(.pink)
+                Text("HEALTH")
+                    .font(.custom("FKGroteskTrial-Regular", size: 10))
+                    .foregroundColor(.gray)
+            }
+            
+            HStack(alignment: .bottom, spacing: 4) {
+                Text("\(score.healthyPercentage)%")
+                    .font(.custom("FKGroteskTrial-Regular", size: 14).weight(.semibold))
+                    .foregroundColor(.white)
+                Text("Healthy")
+                    .font(.custom("FKGroteskTrial-Regular", size: 8))
+                    .foregroundColor(.green)
+                    .padding(.bottom, 2)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 80)
+        .background(Color.white.opacity(0.05))
+        .cornerRadius(12)
+    }
+    
+    // Placeholder Action Button
     private var actionButton: some View {
-        Button(action: {}) {
+        Button(action: {
+            showGlobalAnalytics = true
+        }) {
             Text("See All Transactions")
                 .font(.custom("FKGroteskTrial-Regular", size: 16).weight(.semibold))
                 .foregroundColor(.black)
@@ -442,11 +401,19 @@ struct FinancialSummaryView: View {
                 .cornerRadius(14)
         }
         .padding(.top, 8)
+        .fullScreenCover(isPresented: $showGlobalAnalytics) {
+            if let token = authManager.token, let url = URL(string: "https://owlit.vercel.app/insights") {
+                 // SFSafariViewController automatically handles the "Done" button when presented modally
+                 SafariView(url: url, token: token)
+                     .ignoresSafeArea()
+            } else {
+                Text("Invalid URL or Unauthenticated")
+            }
+        }
     }
     
     // MARK: - Helpers
     private func cleanDomain(_ name: String) -> String {
-        // Remove spaces and special chars to help simple logo finding
         let simple = name.lowercased().filter { $0.isLetter || $0.isNumber }
         return simple + ".com"
     }
@@ -459,7 +426,8 @@ struct FinancialSummaryView: View {
     }
 }
 
-// MARK: - Chart Shape
+// MARK: - Chart Components (Reused or Definitions)
+
 struct ChartShape: Shape {
     let data: [Double]
     var closed: Bool = false
@@ -469,14 +437,12 @@ struct ChartShape: Shape {
         guard data.count > 1 else { return path }
         
         let minVal = 0.0
-        // Use a fixed max if all zero, else max
         let maxData = data.max() ?? 1.0
         let maxVal = maxData == 0 ? 100.0 : maxData * 1.1
         let range = maxVal - minVal
         
         let stepX = rect.width / CGFloat(data.count - 1)
         
-        // Start first point
         let firstY = rect.height - CGFloat((data[0] - minVal) / range) * rect.height
         path.move(to: CGPoint(x: 0, y: firstY))
         
@@ -497,30 +463,24 @@ struct ChartShape: Shape {
     }
 }
 
-// MARK: - Mesh Grid Shape
 struct MeshGrid: Shape {
     let spacing: CGFloat
     
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        
-        // Horizontal lines
         for y in stride(from: 0, to: rect.height, by: spacing) {
             path.move(to: CGPoint(x: 0, y: y))
             path.addLine(to: CGPoint(x: rect.width, y: y))
         }
-        
-        // Vertical lines
         for x in stride(from: 0, to: rect.width, by: spacing) {
             path.move(to: CGPoint(x: x, y: 0))
             path.addLine(to: CGPoint(x: x, y: rect.height))
         }
-        
         return path
     }
 }
 
-// Preview
 #Preview {
-    FinancialSummaryView(merchant: "Uber")
+    FinancialSummaryView(merchantId: "test", merchantName: "Tesco")
+        .environmentObject(AuthManager())
 }
