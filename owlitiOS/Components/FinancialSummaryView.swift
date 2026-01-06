@@ -1,4 +1,3 @@
-
 import SwiftUI
 
 struct FinancialSummaryView: View {
@@ -23,12 +22,15 @@ struct FinancialSummaryView: View {
     @State private var errorMessage: String?
     @State private var resolvedMerchantName: String = ""
     @State private var showGlobalAnalytics = false
+    @State private var startAnimation = false
+    @State private var chartProgress: CGFloat = 0.0 // Animation State
+    @State private var selectedIndex: Int? = nil // Chart Interaction State
     
     // MARK: - Body
     var body: some View {
         ZStack {
-            // Background
-            Color(hex: "121212").ignoresSafeArea()
+            // Background - Creamy White
+            Color(hex: "FAFAF5").ignoresSafeArea()
             
             if isLoading {
                 loadingView
@@ -36,6 +38,11 @@ struct FinancialSummaryView: View {
                 errorView(message: error)
             } else if let data = summary {
                 contentView(data: data)
+                    .onAppear {
+                        withAnimation(.easeOut(duration: 1.5)) {
+                            startAnimation = true
+                        }
+                    }
             }
         }
         .task {
@@ -76,7 +83,7 @@ struct FinancialSummaryView: View {
     
     private var loadingView: some View {
         ProgressView()
-            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+            .progressViewStyle(CircularProgressViewStyle(tint: .black))
             .scaleEffect(1.2)
     }
     
@@ -84,11 +91,11 @@ struct FinancialSummaryView: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.largeTitle)
-                .foregroundColor(.yellow)
+                .foregroundColor(.orange)
             
             Text("Something went wrong")
             .font(.headline)
-            .foregroundColor(.white)
+            .foregroundColor(.black)
             
             Text(message)
             .font(.caption)
@@ -106,32 +113,17 @@ struct FinancialSummaryView: View {
     private func contentView(data: MerchantSummary) -> some View {
         ScrollView {
             VStack(spacing: 24) {
-                // Header inside scroll view to scroll with content
-                HStack {
-                    Spacer()
-                    
-                    Button(action: {
-                        dismiss()
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 30))
-                            .foregroundColor(Color(.systemGray4))
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.top, 20)
+                // Spacer().frame(height: 20) // Optional spacing if needed
                 
                 VStack(spacing: 12) {
-                    headerSection(summary: data) // Re-using header logic for logo? Layout might be redundant.
-                    // Let's hide the top header and rely on the internal card header or merge them.
-                    // The previous design had a "card" style. Let's keep the card style.
+                    headerSection(summary: data) 
                     
                     heroStatsSection(data: data)
                     
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Spending Trend (12 Weeks)")
                             .font(.headline)
-                            .foregroundColor(.white)
+                            .foregroundColor(.black)
                             .padding(.horizontal)
                         
                         trendSection(data: data)
@@ -140,29 +132,20 @@ struct FinancialSummaryView: View {
                     insightsGrid(data: data)
                 }
                 .padding(16)
-                .background(
-                    LinearGradient(
-                        colors: [Color(hex: "0F200F"), Color.black],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .background(Color.white) // White card on Cream background
                 .cornerRadius(15)
-                .shadow(color: Color.black.opacity(0.5), radius: 24, x: 0, y: 12)
+                .shadow(color: Color.black.opacity(0.05), radius: 15, x: 0, y: 5)
                 .overlay(
                     RoundedRectangle(cornerRadius: 15)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        .stroke(Color.black.opacity(0.05), lineWidth: 0.5)
                 )
                 
                 actionButton
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 40)
+            .padding(.top, 24)
         }
-    }
-    
-    private var displayName: String {
-        return resolvedMerchantName.isEmpty ? merchantName : resolvedMerchantName
     }
     
     // MARK: - Sub-Components
@@ -176,7 +159,7 @@ struct FinancialSummaryView: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 40, height: 40)
                         .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.white.opacity(0.1), lineWidth: 1))
+                        .overlay(Circle().stroke(Color.black.opacity(0.1), lineWidth: 1))
                 } else {
                     Circle()
                         .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -206,33 +189,34 @@ struct FinancialSummaryView: View {
         HStack(spacing: 12) {
             heroCard(
                 label: "THIS MONTH",
-                value: formatCurrency(data.periodStats.currentMonth.cleanTotal),
+                value: data.periodStats.currentMonth.cleanTotal,
                 percentChange: data.periodStats.currentMonth.percentageChange
             )
             
             heroCard(
                 label: "THIS YEAR",
-                value: formatCurrency(data.periodStats.currentYear.cleanTotal),
+                value: data.periodStats.currentYear.cleanTotal,
                 percentChange: data.periodStats.currentYear.percentageChange
             )
         }
     }
     
-    private func heroCard(label: String, value: String, percentChange: Double?) -> some View {
+    private func heroCard(label: String, value: Double, percentChange: Double?) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.custom("FKGroteskTrial-Regular", size: 12))
-                .foregroundColor(Color(white: 0.6))
+                .foregroundColor(Color.gray)
             
             VStack(alignment: .leading, spacing: 2) {
-                Text(value)
+                // Animated Currency
+                AnimatedText(value: startAnimation ? value : 0, formatType: .currency)
                     .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.white)
+                    .foregroundColor(.black)
                 
                 if let change = percentChange {
                     HStack(spacing: 4) {
                         Image(systemName: change > 0 ? "arrow.up.right" : "arrow.down.right")
-                        Text(String(format: "%.1f%%", abs(change)))
+                        AnimatedText(value: startAnimation ? abs(change) : 0, formatType: .percent)
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
                     }
                     .foregroundColor(change > 0 ? Color.red : Color.green)
@@ -245,8 +229,12 @@ struct FinancialSummaryView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.05))
+        .background(Color(hex: "FAFAF5")) // Creamy White
         .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white, lineWidth: 1.5)
+        )
     }
     
     private func trendSection(data: MerchantSummary) -> some View {
@@ -258,28 +246,128 @@ struct FinancialSummaryView: View {
                     .padding(.vertical, 30)
                     .foregroundColor(.gray)
             } else {
-                let recentData = data.trendGraph // Use full graph or slice if needed
+                let recentData = data.trendGraph 
                 VStack(spacing: 0) {
                     ZStack {
-                        MeshGrid(spacing: 20) // adjusted spacing
-                            .stroke(Color.secondary.opacity(0.3), style: StrokeStyle(lineWidth: 0.5, dash: [1, 2]))
+                        // Dense Silver Grid (Tighter)
+                        MeshGrid(spacing: 3)
+                            .stroke(Color(hex: "D3D3D3").opacity(0.5), style: StrokeStyle(lineWidth: 0.5))
                         
                         ChartShape(data: recentData, closed: true)
                             .fill(
                                 LinearGradient(
-                                    colors: [Color(hex: "00FF9C").opacity(0.4), Color(hex: "00FF9C").opacity(0.0)],
+                                    colors: [Color.orange.opacity(0.6), Color.orange.opacity(0.1)], // Intense Orange
                                     startPoint: .top,
                                     endPoint: .bottom
                                 )
                             )
+                            // Wipe mask for the fill
+                            .mask(
+                                Rectangle()
+                                    .scaleEffect(x: chartProgress, y: 1, anchor: .leading)
+                            )
                             .overlay(
                                 ChartShape(data: recentData)
-                                    .stroke(Color(hex: "00FF9C"), lineWidth: 2)
+                                    .trim(from: 0, to: chartProgress) // Animate stroke drawing
+                                    .stroke(
+                                        LinearGradient(colors: [Color.orange, Color.red], startPoint: .leading, endPoint: .trailing),
+                                        style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
+                                    )
                             )
+                            
+                        // Data Labels (Static) - Only show if NO interaction is happening
+                        if chartProgress > 0.9 && selectedIndex == nil { 
+                            GeometryReader { geo in
+                                let points = calculatePoints(data: recentData, rect: geo.frame(in: .local))
+                                ForEach(0..<points.count, id: \.self) { i in
+                                    // Show Label for Max, Min, and Last
+                                    if shouldShowLabel(index: i, data: recentData) {
+                                        Text(String(format: "£%.0f", recentData[i]))
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundColor(.black)
+                                            .padding(2)
+                                            .background(Color.white.opacity(0.8))
+                                            .cornerRadius(4)
+                                            .position(x: points[i].x, y: points[i].y - 12)
+                                    }
+                                }
+                            }
+                        }
                         
-                        // Data Labels (Optional: Show max/min or last point)
+                        // Interactive Tooltip Overlay
+                        GeometryReader { geo in
+                            let points = calculatePoints(data: recentData, rect: geo.frame(in: .local))
+                            
+                            // Ghost Interaction Layer
+                            Color.white.opacity(0.001) // Invisible but interactable
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            let stepX = geo.size.width / CGFloat(recentData.count - 1)
+                                            let index = Int(round(value.location.x / stepX))
+                                            let safeIndex = max(0, min(recentData.count - 1, index))
+                                            
+                                            // Haptic & State Update
+                                            if safeIndex != self.selectedIndex {
+                                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                                self.selectedIndex = safeIndex
+                                            }
+                                        }
+                                        .onEnded { _ in
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                                withAnimation {
+                                                    self.selectedIndex = nil
+                                                }
+                                            }
+                                        }
+                                )
+                            
+                            if let idx = selectedIndex, idx < points.count {
+                                let point = points[idx]
+                                let weeksAgo = recentData.count - 1 - idx
+                                let date = Calendar.current.date(byAdding: .weekOfYear, value: -weeksAgo, to: Date()) ?? Date()
+                                let dateString = (weeksAgo == 0) ? "This Week" : date.formatted(.dateTime.day().month())
+                                
+                                // Vertical Line
+                                Path { path in
+                                    path.move(to: CGPoint(x: point.x, y: 0))
+                                    path.addLine(to: CGPoint(x: point.x, y: geo.size.height))
+                                }
+                                .stroke(Color.gray, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                                
+                                // Dot
+                                Circle()
+                                    .fill(Color.orange)
+                                    .frame(width: 8, height: 8)
+                                    .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                                    .position(point)
+                                
+                                // Tooltip (Above point)
+                                VStack(spacing: 2) {
+                                    Text(dateString)
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.gray)
+                                    
+                                    Text(String(format: "£%.2f", recentData[idx]))
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 8)
+                                .background(Color.black.opacity(0.8))
+                                .cornerRadius(8)
+                                .position(x: max(35, min(geo.size.width - 35, point.x)), y: max(24, point.y - 35))
+                            }
+                        }
                     }
                     .frame(height: 160)
+                    .onAppear {
+                        // Delay slightly to ensure transition finishes before animating
+                        // Slow down animation to 3.0s
+                        withAnimation(.easeInOut(duration: 3.0).delay(0.2)) {
+                            chartProgress = 1.0
+                        }
+                    }
                     
                     // Simple X-Axis
                     HStack {
@@ -302,19 +390,25 @@ struct FinancialSummaryView: View {
             insightCard(
                 icon: "arrow.counterclockwise",
                 title: "PREV MONTH",
-                value: formatCurrency(data.periodStats.previousMonth.cleanTotal)
+                value: "N/A",
+                rawValue: data.periodStats.previousMonth.cleanTotal,
+                formatType: .currency
             )
             
             insightCard(
                 icon: "chart.pie.fill",
                 title: "CONTRIBUTION",
-                value: String(format: "%.1f%%", data.insights.contributionPercentage ?? 0)
+                value: "N/A",
+                rawValue: data.insights.contributionPercentage ?? 0,
+                formatType: .percent
             )
             
             insightCard(
                 icon: "figure.walk",
                 title: "VISITS",
-                value: "\(data.insights.visitCount ?? 0)"
+                value: "\(data.insights.visitCount ?? 0)",
+                rawValue: Double(data.insights.visitCount ?? 0),
+                formatType: .number
             )
             
             insightCard(
@@ -334,7 +428,7 @@ struct FinancialSummaryView: View {
         }
     }
     
-    private func insightCard(icon: String, title: String, value: String) -> some View {
+    private func insightCard(icon: String, title: String, value: String, rawValue: Double? = nil, formatType: AnimatedText.FormatType? = nil) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
                 Image(systemName: icon)
@@ -347,17 +441,29 @@ struct FinancialSummaryView: View {
                     .minimumScaleFactor(0.8)
             }
             
-            Text(value)
-                .font(.custom("FKGroteskTrial-Regular", size: 14).weight(.semibold))
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+            if let dVal = rawValue, let fmt = formatType {
+                AnimatedText(value: startAnimation ? dVal : 0, formatType: fmt)
+                    .font(.custom("FKGroteskTrial-Regular", size: 14).weight(.semibold))
+                    .foregroundColor(.black)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            } else {
+                Text(value)
+                    .font(.custom("FKGroteskTrial-Regular", size: 14).weight(.semibold))
+                    .foregroundColor(.black)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 80)
-        .background(Color.white.opacity(0.05))
+        .background(Color(hex: "FAFAF5")) // Creamy White
         .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white, lineWidth: 1.5)
+        )
     }
     
     private func healthScoreCard(score: HealthScore) -> some View {
@@ -371,9 +477,14 @@ struct FinancialSummaryView: View {
             }
             
             HStack(alignment: .bottom, spacing: 4) {
-                Text("\(score.healthyPercentage)%")
+                // Animated Health Score
+                AnimatedText(value: startAnimation ? Double(score.healthyPercentage) : 0, formatType: .number)
                     .font(.custom("FKGroteskTrial-Regular", size: 14).weight(.semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(.black)
+                Text("%")
+                    .font(.custom("FKGroteskTrial-Regular", size: 14).weight(.semibold))
+                    .foregroundColor(.black)
+                    
                 Text("Healthy")
                     .font(.custom("FKGroteskTrial-Regular", size: 8))
                     .foregroundColor(.green)
@@ -383,21 +494,26 @@ struct FinancialSummaryView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 80)
-        .background(Color.white.opacity(0.05))
+        .background(Color(hex: "FAFAF5"))
         .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white, lineWidth: 1.5)
+        )
     }
     
     // Placeholder Action Button
     private var actionButton: some View {
         Button(action: {
+            triggerHaptic(style: .medium)
             showGlobalAnalytics = true
         }) {
             Text("See All Transactions")
                 .font(.custom("FKGroteskTrial-Regular", size: 16).weight(.semibold))
-                .foregroundColor(.black)
+                .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.white)
+                .background(Color.black) // Dark button
                 .cornerRadius(14)
         }
         .padding(.top, 8)
@@ -413,20 +529,49 @@ struct FinancialSummaryView: View {
     }
     
     // MARK: - Helpers
+    private func triggerHaptic(style: UIImpactFeedbackGenerator.FeedbackStyle) {
+        let generator = UIImpactFeedbackGenerator(style: style)
+        generator.prepare()
+        generator.impactOccurred()
+    }
+    
     private func cleanDomain(_ name: String) -> String {
         let simple = name.lowercased().filter { $0.isLetter || $0.isNumber }
         return simple + ".com"
     }
     
-    private func formatCurrency(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "GBP"
-        return formatter.string(from: NSNumber(value: value)) ?? "£0.00"
+    private func shouldShowLabel(index: Int, data: [Double]) -> Bool {
+        guard !data.isEmpty else { return false }
+        let maxIndex = data.indices.max(by: { data[$0] < data[$1] })
+        let minIndex = data.indices.min(by: { data[$0] < data[$1] })
+        let lastIndex = data.count - 1
+        
+        return index == maxIndex || index == minIndex || index == lastIndex
+    }
+    
+    private func calculatePoints(data: [Double], rect: CGRect) -> [CGPoint] {
+        var points: [CGPoint] = []
+        guard data.count > 1 else { return points }
+        
+        // Match scaling logic in ChartShape
+        let minVal = 0.0
+        let maxData = data.max() ?? 1.0
+        let maxVal = maxData == 0 ? 100.0 : maxData * 1.1
+        let range = maxVal - minVal
+        
+        let stepX = rect.width / CGFloat(data.count - 1)
+        
+        for i in 0..<data.count {
+            let x = CGFloat(i) * stepX
+            let val = data[i]
+            let y = rect.height - CGFloat((val - minVal) / range) * rect.height
+            points.append(CGPoint(x: x, y: y))
+        }
+        return points
     }
 }
 
-// MARK: - Chart Components (Reused or Definitions)
+// MARK: - Chart Components
 
 struct ChartShape: Shape {
     let data: [Double]

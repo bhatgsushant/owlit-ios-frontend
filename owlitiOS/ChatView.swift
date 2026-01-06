@@ -36,16 +36,17 @@ struct ChatView: View {
     // Copy Toast State
     @State private var showCopyToast = false
     @State private var showHealthOverview = false
+    @State private var showSideMenu = false // Custom Sidebar State
 
     
     // Focus State for Input Field
     @FocusState private var isInputFocused: Bool
     
     // Dynamic Theme Colors
-    var themeBackground: Color { isDarkMode ? .black : Color(uiColor: .systemGray6) }
+    var themeBackground: Color { isDarkMode ? .black : Color(hex: "FAFAF5") } // Creamy White
     var themeText: Color { isDarkMode ? .white : .black }
     var themeSecondaryBackground: Color { isDarkMode ? Color(white: 0.12) : .white }
-    var themeHeaderBackground: Color { isDarkMode ? Color.black.opacity(0.95) : Color(uiColor: .systemGray6).opacity(0.95) }
+    var themeHeaderBackground: Color { isDarkMode ? Color.black.opacity(0.95) : Color(hex: "FAFAF5").opacity(0.95) }
     
     // Legacy fixed colors (keeping for reference if needed, but mostly replacing)
     let pitchBlack = Color.black 
@@ -75,6 +76,13 @@ struct ChatView: View {
                 // MARK: - Layer 3: Toast Overlay
                 toastOverlay
                     .zIndex(4)
+                
+                // MARK: - Layer 5: Side Menu Overlay
+                if showSideMenu {
+                    sideMenuView
+                        .zIndex(5)
+                        .transition(.opacity)
+                }
                     
                 // MARK: - Layer 4: Loading Overlay (Merchant Resolution)
                 if isResolvingMerchant {
@@ -161,7 +169,7 @@ struct ChatView: View {
     private var scrollableContent: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 12) {
+                LazyVStack(spacing: 12) {
                     // Spacer for Header (Dynamic or Fixed?)
                     // Header is approx 50-60pt total? Padding 8+12+24 = 44 + SafeArea.
                     // Let's use a safe spacer 
@@ -921,22 +929,12 @@ extension ChatView {
                 // Layer 1: Left and Right Controls
                 HStack(spacing: 0) {
                     // Left: Profile & Menu
-                    Menu {
-                        // Theme Toggle
-                        Button(action: {
-                            isDarkMode.toggle()
-                        }) {
-                            Image(systemName: isDarkMode ? "sun.max" : "moon")
+                    // Left: Profile & Menu (Now Custom Sidebar)
+                    Button(action: {
+                        withAnimation(.spring()) {
+                            showSideMenu.toggle()
                         }
-                        
-                        Divider()
-                        
-                        Button(role: .destructive, action: {
-                            authManager.logout()
-                        }) {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                        }
-                    } label: {
+                    }) {
                         HStack(spacing: 12) {
                             // Profile Image
                             if let avatarURL = authManager.user?.avatarURL {
@@ -967,11 +965,11 @@ extension ChatView {
                             // Greeting & Name
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(currentGreeting)
-                                    .font(.custom("FKGroteskTrial-Regular", size: 10)) // Reduced from 12
+                                    .font(.custom("FKGroteskTrial-Regular", size: 10))
                                     .foregroundColor(.gray)
                                 
                                 Text(authManager.user?.fullName ?? authManager.user?.bestDisplayName ?? "User")
-                                    .font(.custom("FKGroteskTrial-Medium", size: 14)) // Reduced from 16
+                                    .font(.custom("FKGroteskTrial-Medium", size: 14))
                                     .foregroundColor(themeText)
                             }
                         }
@@ -1017,10 +1015,6 @@ extension ChatView {
         VStack(spacing: 24) {
             Spacer()
             
-            // Centered Logo in Light Gray
-            OwlitLogo(size: 80)
-                .grayscale(1.0)
-                .opacity(0.3)
             
             // Tagline
             Text("")
@@ -1038,6 +1032,73 @@ extension ChatView {
     }
 
 
+    
+    // MARK: - Side Menu
+    private var sideMenuView: some View {
+        ZStack(alignment: .topLeading) {
+            // Background Dim (Tap to Close)
+            Color.black.opacity(0.01) // Nearly invisible tap area, or standard dim
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation { showSideMenu = false }
+                }
+            
+            // Sidebar Content
+            VStack(alignment: .leading, spacing: 12) {
+                // Theme Toggle
+                Button(action: {
+                    triggerHaptic(style: .medium)
+                    isDarkMode.toggle()
+                }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: isDarkMode ? "sun.max" : "moon")
+                            .font(.system(size: 12))
+                            .foregroundColor(themeText)
+                            .frame(width: 24, height: 24)
+                            .background(themeSecondaryBackground)
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+                        
+                        Text("Theme")
+                            .font(.custom("FKGroteskTrial-Regular", size: 12))
+                            .foregroundColor(themeText)
+                    }
+                }
+                
+                // Divider (Small)
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(height: 1)
+                    .padding(.trailing, 24) // Slight inset from right if needed, or just full width
+                
+                // Logout
+                Button(action: {
+                    triggerHaptic(style: .medium)
+                    showSideMenu = false
+                    authManager.logout()
+                }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                            .font(.system(size: 12))
+                            .foregroundColor(.red)
+                            .frame(width: 24, height: 24)
+                            .background(Color.red.opacity(0.1))
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+                        
+                        Text("Log out")
+                            .font(.custom("FKGroteskTrial-Regular", size: 12))
+                            .foregroundColor(.red)
+                    }
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false) // Allow width to fit content
+            .background(Color.clear) // Transparent Background
+            .padding(.top, 60) // Offset to start below the Profile Photo (Header Height)
+            .padding(.leading, 20) // Align Icon center with Profile
+            .transition(.move(edge: .leading))
+        }
+    }
 }
 
 // MARK: - Isolated Input Bar View
@@ -1109,14 +1170,7 @@ struct ChatInputBar: View {
                             .contentShape(Rectangle())
                     }
                     
-                    // Health Insights
-                    Button(action: { onInsightsTap() }) {
-                        Image(systemName: "chart.bar.xaxis")
-                            .font(.system(size: 18, weight: .regular))
-                            .foregroundColor(isDarkMode ? .gray : .black)
-                            .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
-                    }
+
 
                     
                     Spacer()
@@ -1257,6 +1311,7 @@ struct MessageBubble: View {
                                 if url.scheme == "merchant" {
                                     let rawName = url.absoluteString.replacingOccurrences(of: "merchant://", with: "")
                                     let merchantName = rawName.removingPercentEncoding ?? rawName
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                     onMerchantTap?(merchantName)
                                     return .handled
                                 }
@@ -1272,6 +1327,7 @@ struct MessageBubble: View {
                                     if url.scheme == "merchant" {
                                         let rawName = url.absoluteString.replacingOccurrences(of: "merchant://", with: "")
                                         let merchantName = rawName.removingPercentEncoding ?? rawName
+                                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                         onMerchantTap?(merchantName)
                                         return .handled
                                     }

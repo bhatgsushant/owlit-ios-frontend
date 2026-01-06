@@ -348,8 +348,9 @@ class APIClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
+        
         // Debug
-        print("🔍 resolving merchant: \(url.absoluteString)")
+        // print("🔍 resolving merchant: \(url.absoluteString)")
         
         // Retry logic wrapper manually or call session directly?
         // rawRequest wraps retryRequest. We can expose retryRequest or duplicate logic.
