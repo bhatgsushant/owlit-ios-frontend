@@ -30,6 +30,11 @@ struct RootView: View {
     @State private var selectedTab: Tab = .scan
     @State private var hasSeenWelcome = false
     @State private var isLaunching = true
+    @State private var pendingReceipt: ReceiptData? // Hand-off data
+    @State private var pendingQuestion: String? // Question Hand-off
+    
+    // Animation Control for Return Navigation
+    @State private var shouldAnimateWelcome = true
     
     // Hide native tab bar
     init() {
@@ -43,16 +48,38 @@ struct RootView: View {
                 .overlay(Color.black.opacity(0.1)) // Subtle Dim for Card POP
             
             if !hasSeenWelcome {
-                WelcomeLandingView {
+                WelcomeLandingView(onContinue: {
                     withAnimation {
                         hasSeenWelcome = true
+                        shouldAnimateWelcome = true // Next time (if full reset)
                     }
-                }
+                }, onScanSuccess: { receipt in
+                    // Logic when scan completes on Landing Page
+                    pendingReceipt = receipt
+                    withAnimation {
+                        hasSeenWelcome = true // Proceed to Main App
+                        shouldAnimateWelcome = true 
+                    }
+                }, onAskAI: { question in
+                    // Logic when user asks a question on Landing Page
+                    pendingQuestion = question
+                    withAnimation {
+                        hasSeenWelcome = true
+                        shouldAnimateWelcome = true
+                    }
+                }, shouldAnimate: shouldAnimateWelcome) // Pass Animation State
+                .environmentObject(auth) // Ensure Auth is available
                 .transition(.opacity)
             } else if auth.isLoading {
                 LoadingView()
             } else if auth.isAuthenticated {
-                ChatView()
+                ChatView(pendingReceipt: $pendingReceipt, pendingQuestion: $pendingQuestion, onNavigateToHome: {
+                    // Navigate back to Landing Page
+                    shouldAnimateWelcome = false // Disable animation for Instant Load
+                    withAnimation {
+                        hasSeenWelcome = false
+                    }
+                })
                     .transition(.opacity)
             } else {
                 LoginView()

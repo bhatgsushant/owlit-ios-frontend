@@ -16,6 +16,13 @@ struct ScanResponse: Codable {
 }
 
 // MARK: - Receipt Data
+// Helper for passing images between views safely
+class ImageTransfer {
+    static let shared = ImageTransfer()
+    var pendingImage: UIImage?
+    private init() {}
+}
+
 struct ReceiptData: Codable, Identifiable, Equatable {
     var id: String? // Optional, might not exist for new scans
     var merchantName: String?
@@ -30,11 +37,12 @@ struct ReceiptData: Codable, Identifiable, Equatable {
     var canonicalMerchantId: String?
     
     // Duplicate Detection
-    var existingReceiptId: String?
     var isPotentialDuplicate: Bool?
     
     // Transient - Not Decoded
     var originalImage: UIImage? = nil
+    
+    var existingReceiptId: String?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -43,9 +51,9 @@ struct ReceiptData: Codable, Identifiable, Equatable {
         case totalAmount = "total_amount"
         case storeType = "store_type"
         case lineItems = "line_items"
+        case existingReceiptId = "existing_receipt_id"
         case selectedMerchantId = "selected_merchant_id"
         case canonicalMerchantId = "canonical_merchant_id"
-        case existingReceiptId = "existing_receipt_id"
         case isPotentialDuplicate = "is_potential_duplicate"
     }
     
@@ -71,52 +79,54 @@ struct LineItem: Codable, Identifiable, Equatable {
     var normalizedName: String?
     var merchantName: String?
     var storeType: String?
+    var receiptId: String?
+    var storeMainCategory: String?
     
     // Handling price potentially coming as string or number from raw JSON
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.item = try container.decodeIfPresent(String.self, forKey: .item) ?? ""
-        self.quantity = try container.decodeIfPresent(Int.self, forKey: .quantity)
-        self.mainCategory = try container.decodeIfPresent(String.self, forKey: .mainCategory)
-        self.subCategory = try container.decodeIfPresent(String.self, forKey: .subCategory)
-        self.normalizedName = try container.decodeIfPresent(String.self, forKey: .normalizedName)
-        self.merchantName = try container.decodeIfPresent(String.self, forKey: .merchantName)
-        self.storeType = try container.decodeIfPresent(String.self, forKey: .storeType)
+        self.item = (try? container.decode(String.self, forKey: .item)) ?? ""
+        
+        // Lenient Quantity
+        if let intQty = try? container.decode(Int.self, forKey: .quantity) {
+            self.quantity = intQty
+        } else if let doubleQty = try? container.decode(Double.self, forKey: .quantity) {
+            self.quantity = Int(doubleQty)
+        } else if let stringQty = try? container.decode(String.self, forKey: .quantity), let q = Int(stringQty) {
+            self.quantity = q
+        }
+        
+        self.mainCategory = try? container.decodeIfPresent(String.self, forKey: .mainCategory)
+        self.subCategory = try? container.decodeIfPresent(String.self, forKey: .subCategory)
+        self.normalizedName = try? container.decodeIfPresent(String.self, forKey: .normalizedName)
+        self.merchantName = try? container.decodeIfPresent(String.self, forKey: .merchantName)
+        self.storeType = try? container.decodeIfPresent(String.self, forKey: .storeType)
+        self.receiptId = try? container.decodeIfPresent(String.self, forKey: .receiptId)
+        self.storeMainCategory = try? container.decodeIfPresent(String.self, forKey: .storeMainCategory)
+        self.transactionDate = try? container.decodeIfPresent(String.self, forKey: .transactionDate)
         
         // Handle Price leniently
-        if let doublePrice = try? container.decode(Double.self, forKey: .price) {
-            self.price = doublePrice
-        } else if let stringPrice = try? container.decode(String.self, forKey: .price) {
-            // Remove currency symbols and parse
-            let clean = stringPrice.replacingOccurrences(of: "[^0-9.]", with: "", options: .regularExpression)
-            self.price = Double(clean)
-        } else {
-            self.price = 0.0
-        }
+        if let d = try? container.decode(Double.self, forKey: .price) { self.price = d }
+        else if let d = try? container.decode(Double.self, forKey: .unitPrice) { self.price = d }
+        else if let s = try? container.decode(String.self, forKey: .price), let d = Double(s.replacingOccurrences(of: "[^0-9.]", with: "", options: .regularExpression)) { self.price = d }
+        else { self.price = 0.0 }
         
         // Handle Total Price
-        if let doubleTotal = try? container.decode(Double.self, forKey: .totalPrice) {
-            self.totalPrice = doubleTotal
-        } else if let stringTotal = try? container.decode(String.self, forKey: .totalPrice) {
-            let clean = stringTotal.replacingOccurrences(of: "[^0-9.]", with: "", options: .regularExpression)
-            self.totalPrice = Double(clean)
-        } else if let doubleTotalCamel = try? container.decode(Double.self, forKey: .totalPriceCamel) {
-             self.totalPrice = doubleTotalCamel
-        }
+        if let d = try? container.decode(Double.self, forKey: .totalPrice) { self.totalPrice = d }
+        else if let s = try? container.decode(String.self, forKey: .totalPrice), let d = Double(s.replacingOccurrences(of: "[^0-9.]", with: "", options: .regularExpression)) { self.totalPrice = d }
+        else if let d = try? container.decode(Double.self, forKey: .totalPriceCamel) { self.totalPrice = d }
         
-        // Fallback for Categories (CamelCase)
-        if self.mainCategory == nil {
-            self.mainCategory = try container.decodeIfPresent(String.self, forKey: .mainCategoryCamel)
-        }
-        if self.subCategory == nil {
-            self.subCategory = try container.decodeIfPresent(String.self, forKey: .subCategoryCamel)
-        }
+        // Legacy fallbacks
+        if self.mainCategory == nil { self.mainCategory = try? container.decodeIfPresent(String.self, forKey: .mainCategoryCamel) }
+        if self.mainCategory == nil { self.mainCategory = try? container.decodeIfPresent(String.self, forKey: .mainCategoryLegacy) }
+        if self.subCategory == nil { self.subCategory = try? container.decodeIfPresent(String.self, forKey: .subCategoryCamel) }
+        if self.subCategory == nil { self.subCategory = try? container.decodeIfPresent(String.self, forKey: .subCategoryLegacy) }
         
-        self.transactionDate = try container.decodeIfPresent(String.self, forKey: .transactionDate)
+        if self.transactionDate == nil { self.transactionDate = try? container.decodeIfPresent(String.self, forKey: .transactionDate) }
     }
     
     // Default Init
-    init(item: String, price: Double?, quantity: Int?, mainCategory: String?, subCategory: String?, totalPrice: Double? = nil, transactionDate: String? = nil, normalizedName: String? = nil, merchantName: String? = nil, storeType: String? = nil) {
+    init(item: String, price: Double?, quantity: Int?, mainCategory: String?, subCategory: String?, totalPrice: Double? = nil, transactionDate: String? = nil, normalizedName: String? = nil, merchantName: String? = nil, storeType: String? = nil, receiptId: String? = nil, storeMainCategory: String? = nil) {
         self.item = item
         self.price = price
         self.quantity = quantity
@@ -127,6 +137,8 @@ struct LineItem: Codable, Identifiable, Equatable {
         self.normalizedName = normalizedName
         self.merchantName = merchantName
         self.storeType = storeType
+        self.receiptId = receiptId
+        self.storeMainCategory = storeMainCategory
     }
     
     func encode(to encoder: Encoder) throws {
@@ -140,6 +152,8 @@ struct LineItem: Codable, Identifiable, Equatable {
         try container.encode(normalizedName, forKey: .normalizedName)
         try container.encode(merchantName, forKey: .merchantName)
         try container.encode(storeType, forKey: .storeType)
+        try container.encode(receiptId, forKey: .receiptId)
+        try container.encode(storeMainCategory, forKey: .storeMainCategory)
     }
     
     enum CodingKeys: String, CodingKey {
@@ -148,14 +162,19 @@ struct LineItem: Codable, Identifiable, Equatable {
         case quantity
         case mainCategory = "main_category"
         case mainCategoryCamel = "mainCategory"
+        case mainCategoryLegacy = "Category"
         case subCategory = "sub_category"
         case subCategoryCamel = "subCategory"
+        case subCategoryLegacy = "SubCategory"
         case totalPrice = "total_price"
         case totalPriceCamel = "totalPrice"
         case transactionDate = "transaction_date"
         case normalizedName = "normalized_name"
         case merchantName = "merchant_name"
         case storeType = "store_type"
+        case unitPrice = "unit_price"
+        case receiptId = "receipt_id"
+        case storeMainCategory = "store_main_category"
     }
 }
 
@@ -198,23 +217,64 @@ struct MerchantResolution: Codable, Identifiable {
     }
 }
 
-// MARK: - Commercial Insights (Server-Side Aggregation)
 struct MerchantSummary: Codable {
     let merchant: String
+    let domain: String?
     let category: String
     let periodStats: PeriodStats
-    let trendGraph: [Double]
+    let trendGraph: [TrendPoint]?
+    
     let insights: SpendingInsights
     
     // Compatibility helper
-    var cleanTrendGraph: [Double] { trendGraph }
+    var cleanTrendGraph: [Double] { trendGraph?.compactMap { $0.value } ?? [] }
+    var safeTrendGraph: [TrendPoint] { trendGraph ?? [] }
     
     enum CodingKeys: String, CodingKey {
         case merchant
+        case domain
         case category
         case periodStats = "period_stats"
         case trendGraph = "trend_graph"
         case insights
+    }
+}
+
+struct TrendPoint: Codable, Identifiable {
+    var id: String { date ?? UUID().uuidString }
+    let date: String?
+    let value: Double?
+    
+    enum CodingKeys: String, CodingKey {
+        case date, value
+    }
+    
+    init(date: String?, value: Double?) {
+        self.date = date
+        self.value = value
+    }
+    
+    init(from decoder: Decoder) throws {
+        // Try to decode as object first
+        if let container = try? decoder.container(keyedBy: CodingKeys.self) {
+            self.date = try container.decodeIfPresent(String.self, forKey: .date)
+            self.value = try container.decodeIfPresent(Double.self, forKey: .value)
+        } else if let singleValue = try? decoder.singleValueContainer() {
+            // Fallback: If server sends just a number (backwards compatibility)
+            if let doubleVal = try? singleValue.decode(Double.self) {
+                self.value = doubleVal
+                self.date = nil
+            } else if let stringVal = try? singleValue.decode(String.self) {
+                self.value = Double(stringVal)
+                self.date = nil
+            } else {
+                self.value = nil
+                self.date = nil
+            }
+        } else {
+            self.value = nil
+            self.date = nil
+        }
     }
 }
 

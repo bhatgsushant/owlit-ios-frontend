@@ -8,6 +8,17 @@
 import SwiftUI
 
 struct ChatView: View {
+    @Binding var pendingReceipt: ReceiptData? // Data from Landing Page
+    @Binding var pendingQuestion: String? // Question from Landing Page
+    var onNavigateToHome: (() -> Void)? = nil
+    
+    // Default Init workaround if needed (optional)
+    init(pendingReceipt: Binding<ReceiptData?> = .constant(nil), pendingQuestion: Binding<String?> = .constant(nil), onNavigateToHome: (() -> Void)? = nil) {
+        self._pendingReceipt = pendingReceipt
+        self._pendingQuestion = pendingQuestion
+        self.onNavigateToHome = onNavigateToHome
+    }
+
     @EnvironmentObject var authManager: AuthManager
     @State private var messages: [ChatMessage] = []
     @State private var isLoading: Bool = false
@@ -30,6 +41,9 @@ struct ChatView: View {
     @State private var isResolvingMerchant = false
     @State private var resolvingMerchantName: String?
     
+    // UI Size State
+    @State private var profileNameWidth: CGFloat = 120 // Default min width
+    
     // Scroll Trigger (for explicit scroll requests)
     @State private var scrollTrigger: Int = 0
     
@@ -37,6 +51,14 @@ struct ChatView: View {
     @State private var showCopyToast = false
     @State private var showHealthOverview = false
     @State private var showSideMenu = false // Custom Sidebar State
+    
+    // Perplexity Header State
+    @State private var activeTab: String = "chat" // chat, shop, analytics
+    @State private var showAnalyticsSheet = false // Re-enabled for in-app viewing
+    @State private var showLocalAnalytics = false
+    
+    // Environment
+    @Environment(\.openURL) var openURL
 
     
     // Focus State for Input Field
@@ -44,9 +66,13 @@ struct ChatView: View {
     
     // Dynamic Theme Colors
     var themeBackground: Color { isDarkMode ? .black : Color(hex: "FAFAF5") } // Creamy White
+    
+    @Namespace private var namespace
     var themeText: Color { isDarkMode ? .white : .black }
     var themeSecondaryBackground: Color { isDarkMode ? Color(white: 0.12) : .white }
     var themeHeaderBackground: Color { isDarkMode ? Color.black.opacity(0.95) : Color(hex: "FAFAF5").opacity(0.95) }
+    private var gridLineColor: Color { isDarkMode ? Color.white.opacity(0.035) : Color.black.opacity(0.02) }
+
     
     // Legacy fixed colors (keeping for reference if needed, but mostly replacing)
     let pitchBlack = Color.black 
@@ -105,7 +131,14 @@ struct ChatView: View {
                 }
             }
             .blur(radius: showSuccessPopup ? 10 : 0) // Blur main content when popup is active
-            .background(themeBackground)
+            .background(
+                ZStack {
+                    themeBackground
+                    MeshGrid(spacing: 5)
+                        .stroke(gridLineColor, lineWidth: 0.5)
+                }
+                .ignoresSafeArea()
+            )
 
             .ignoresSafeArea(.container, edges: .bottom) // Ensure Edge-to-Edge
             .preferredColorScheme(isDarkMode ? .dark : .light)
@@ -116,6 +149,23 @@ struct ChatView: View {
                     .transition(.opacity)
                     .zIndex(100)
             }
+        }
+        .fullScreenCover(isPresented: $showAnalyticsSheet) {
+            if let url = URL(string: "https://owlit.vercel.app/insights") {
+                 SafariView(url: url, token: nil)
+                     .ignoresSafeArea()
+            } else {
+                Text("Invalid URL")
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+                    .onTapGesture { showAnalyticsSheet = false }
+            }
+        }
+        .sheet(isPresented: $showLocalAnalytics) {
+            Analytics()
+                .presentationDetents([.fraction(0.85), .large])
+                .presentationDragIndicator(.visible)
         }
         // Sheet for Receipt Review is top level logic
         .sheet(item: $scannedData) { data in
@@ -158,9 +208,25 @@ struct ChatView: View {
         )
         .onAppear { 
             loadRecentChats()
-            // Auto-focus input on appear
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                isInputFocused = true
+            
+            // Check for pending receipt from Landing Page
+            if let receipt = pendingReceipt {
+                print("🚀 ChatView.onAppear: Found Pending Receipt. Image: \(receipt.originalImage != nil)")
+                handleLocalReceiptIngestion(receipt)
+                self.pendingReceipt = nil // Clear it
+                // Do NOT focus input ensuring collapsed state
+                // Do NOT focus input ensuring collapsed state
+                isInputFocused = false
+            } else if let question = pendingQuestion {
+                // Handle pending question from Landing Page
+                submitQuery(question)
+                self.pendingQuestion = nil
+                isInputFocused = false
+            } else {
+                // Auto-focus input on appear only if no receipt/question ingestion occurred
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isInputFocused = true
+                }
             }
         }
     }
@@ -207,7 +273,7 @@ struct ChatView: View {
                 }
                 .padding(.bottom, 0)
             }
-            .background(themeBackground)
+            .background(Color.clear)
             .ignoresSafeArea() // True Full Screen
             .onChange(of: messages.count) { _ in
                 // Delay slightly to allow layout to settle
@@ -329,9 +395,22 @@ struct ChatView: View {
                     scrollTrigger += 1
                 },
                 onEditReceipt: { data in
+                    print("📝 Edit Tap: Receipt has Image? \(data.originalImage != nil)")
+                    
+                    // Fallback to message image if receipt data lost it
+                    let finalImage = data.originalImage ?? message.image
+                    
+                    if finalImage == nil {
+                         print("❌ WARNING: Receipt image is NIL (even after fallback). Edit will fail.")
+                    }
+                    
                     // Trigger the sheet with existing data
-                    self.scannedData = data
-                    self.selectedImage = data.originalImage // Might be nil, but View handles it
+                    // Ensure we pass the image back into the data if it was missing from struct
+                    var fixedData = data
+                    if fixedData.originalImage == nil { fixedData.originalImage = finalImage }
+                    
+                    self.scannedData = fixedData
+                    self.selectedImage = finalImage
                     self.editingMessageId = message.id
                 },
                 onAnimationEnd: {
@@ -548,6 +627,35 @@ struct ChatView: View {
             }
         }
     }
+    // Dynamically resolve and open the summary for the user's most frequent shop
+    private func openTopMerchantSummary() {
+        Task {
+            guard let token = authManager.token else { return }
+            
+            // 1. Fetch merchants sorted by frequency (DESC)
+            do {
+                let merchants = try await APIClient.shared.fetchFilteredMerchants(token: token)
+                
+                if let topMerchant = merchants.first {
+                    // 2. Resolve name to structured resolution
+                    let resolution = try await APIClient.shared.resolveMerchant(name: topMerchant, token: token)
+                    await MainActor.run {
+                        self.selectedMerchantResolution = resolution
+                    }
+                } else {
+                    // Fallback if no history yet
+                    await MainActor.run {
+                        self.selectedMerchantResolution = MerchantResolution(id: "tesco", displayName: "Tesco")
+                    }
+                }
+            } catch {
+                print("⚠️ Failed to resolve top merchant: \(error)")
+                await MainActor.run {
+                    self.selectedMerchantResolution = MerchantResolution(id: "tesco", displayName: "Tesco")
+                }
+            }
+        }
+    }
     
     // ... rest of logic
     
@@ -651,12 +759,15 @@ struct ChatView: View {
                             
                             receipt.originalImage = resizedImage
                             // Add final receipt message
-                            messages.append(ChatMessage(
+                            // Store image in ChatMessage as backup
+                            var successMsg = ChatMessage(
                                 content: "Receipt Successfully Saved",
                                 isUser: false,
                                 receiptData: receipt,
+                                image: resizedImage, // Backup Image
                                 style: .success
-                            ))
+                            )
+                            messages.append(successMsg)
                             self.isInputFocused = false // Ensure keyboard is closed
                         }
                     }
@@ -669,6 +780,51 @@ struct ChatView: View {
                     self.isInputFocused = false
                     messages.append(ChatMessage(content: "❌ Error: \(error.localizedDescription)", isUser: false))
                 }
+            }
+        }
+    }
+    
+    // Helper to ingest receipt from Landing Page
+    func handleLocalReceiptIngestion(_ receipt: ReceiptData) {
+        // Robust Image Recovery
+        var imageToUse = receipt.originalImage
+        
+        // 1. Check Singleton if struct failed
+        if imageToUse == nil {
+            print("⚠️ ChatView: Struct missing image. Checking Singleton...")
+            if let transferImage = ImageTransfer.shared.pendingImage {
+                print("✅ Rec recovered image from Singleton!")
+                imageToUse = transferImage
+                // Clear singleton after retrieval to free memory
+                ImageTransfer.shared.pendingImage = nil 
+            }
+        }
+        
+        print("🚀 ChatView.ingest: Final Image Present? \(imageToUse != nil)")
+        
+        // 1. User Message (Image)
+        if let originalImage = imageToUse {
+            let userMsg = ChatMessage(content: "", isUser: true, image: originalImage)
+            withAnimation { messages.append(userMsg) }
+        } else {
+             let userMsg = ChatMessage(content: "Scanned Receipt", isUser: true)
+             withAnimation { messages.append(userMsg) }
+        }
+        
+        // 2. Success Message
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            withAnimation {
+                var fixedReceipt = receipt
+                fixedReceipt.originalImage = imageToUse // Ensure struct has it
+                
+                messages.append(ChatMessage(
+                    content: "Receipt Successfully Saved",
+                    isUser: false,
+                    receiptData: fixedReceipt,
+                    image: imageToUse, // Backup Image
+                    style: .success
+                ))
+                scrollTrigger += 1
             }
         }
     }
@@ -803,7 +959,14 @@ struct ChatView: View {
                     return dict
                 }
                 
-                var body: [String: Any] = ["question": question, "history": history]
+                // Inject System Persona
+                var finalHistory = history
+                let userName = authManager.user?.bestDisplayName ?? "User"
+                let systemInstruction = "You are Owlit, a witty, chatty, and playful financial assistant. Address the user as \(userName) occasionally. Use emojis ⚡️ and keep the vibe fun but helpful."
+                
+                finalHistory.insert(["role": "system", "text": systemInstruction], at: 0)
+                
+                var body: [String: Any] = ["question": question, "history": finalHistory]
                 if isRetry {
                     body["isRetry"] = true
                 }
@@ -924,11 +1087,134 @@ fileprivate func triggerHaptic(style: UIImpactFeedbackGenerator.FeedbackStyle) {
 // MARK: - Extracted Subviews
 extension ChatView {
     private var headerView: some View {
+        ZStack(alignment: .top) {
+            if isInputFocused {
+                perplexityHeader
+                    .transition(.opacity)
+                    .zIndex(1)
+            } else {
+                defaultHeader
+                    .transition(.opacity)
+                    .zIndex(0)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: isInputFocused)
+    }
+    
+    private var perplexityHeader: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                // Back Button (Dismiss Keyboard)
+                Button(action: {
+                    hideKeyboard()
+                }) {
+                    Circle()
+                        .fill(isDarkMode ? Color(white: 0.15) : Color.gray.opacity(0.1))
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            Image(systemName: "arrow.left")
+                                .font(.system(size: 14, weight: .regular))
+                                .foregroundColor(themeText)
+                        )
+                }
+                .padding(.leading, 8) // Reduced padding from 16
+                
+                Spacer() // Equal Spacing
+                
+                // Central Pill
+                HStack(spacing: 0) {
+                    // Segment 1: Owlit Logo (Chat)
+                    Button(action: {
+                        withAnimation { activeTab = "chat" }
+                        hideKeyboard()
+                    }) {
+                        ZStack {
+                            if activeTab == "chat" {
+                                Capsule()
+                                    .fill(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.05))
+                                    .padding(4)
+                                    .matchedGeometryEffect(id: "activeTab", in: namespace)
+                            }
+                            OwlitLogo(size: 18, isDarkMode: isDarkMode)
+                        }
+                        .frame(width: 80, height: 36) // Increased width
+                    }
+                    
+                    Divider().frame(height: 14).background(Color.gray.opacity(0.3))
+                    
+                    // Segment 2: Shop Icon (Financial Summary)
+                    Button(action: {
+                        triggerHaptic(style: .light)
+                        openTopMerchantSummary()
+                    }) {
+                        ZStack {
+                            if activeTab == "shop" {
+                                Capsule()
+                                    .fill(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.05))
+                                    .padding(4)
+                                    .matchedGeometryEffect(id: "activeTab", in: namespace)
+                            }
+                            Image(systemName: "storefront.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(activeTab == "shop" ? themeText : themeText.opacity(0.7))
+                        }
+                        .frame(width: 80, height: 36) // Increased width
+                    }
+                    
+                    Divider().frame(height: 14).background(Color.gray.opacity(0.3))
+                    
+                    // Segment 3: Analytics Icon (External Insights)
+                    Button(action: {
+                        withAnimation { activeTab = "analytics" }
+                        // Open in app using SafariView
+                        showAnalyticsSheet = true
+                    }) {
+                        ZStack {
+                            if activeTab == "analytics" {
+                                Capsule()
+                                    .fill(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.05))
+                                    .padding(4)
+                                    .matchedGeometryEffect(id: "activeTab", in: namespace)
+                            }
+                            Image(systemName: "chart.pie.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(activeTab == "analytics" ? themeText : themeText.opacity(0.7))
+                        }
+                        .frame(width: 80, height: 36) // Increased width
+                    }
+                }
+                .background(isDarkMode ? Color(white: 0.15) : Color.gray.opacity(0.1))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.05), lineWidth: 1))
+                
+                Spacer() // Equal Spacing
+                
+                // Share Button
+                Button(action: {
+                    triggerHaptic(style: .light)
+                }) {
+                    Circle()
+                        .fill(isDarkMode ? Color(white: 0.15) : Color.gray.opacity(0.1))
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 14, weight: .regular))
+                                .foregroundColor(themeText)
+                        )
+                }
+                .padding(.trailing, 8)
+            }
+            .padding(.vertical, 8)
+        }
+        .background(themeHeaderBackground)
+    }
+
+
+    private var defaultHeader: some View {
         VStack(spacing: 0) {
             ZStack {
                 // Layer 1: Left and Right Controls
                 HStack(spacing: 0) {
-                    // Left: Profile & Menu
                     // Left: Profile & Menu (Now Custom Sidebar)
                     Button(action: {
                         withAnimation(.spring()) {
@@ -972,6 +1258,12 @@ extension ChatView {
                                     .font(.custom("FKGroteskTrial-Medium", size: 14))
                                     .foregroundColor(themeText)
                             }
+                            .background(GeometryReader { geo in
+                                Color.clear.preference(key: WidthPreferenceKey.self, value: geo.size.width)
+                            })
+                            .onPreferenceChange(WidthPreferenceKey.self) { newWidth in
+                                self.profileNameWidth = newWidth
+                            }
                         }
                         .padding(.leading, 16)
                     }
@@ -981,8 +1273,8 @@ extension ChatView {
                     // Right: New Chat
                     Button(action: {
                         withAnimation {
-                             messages = []
-                             isLoading = false
+                            messages = []
+                            isLoading = false
                         }
                     }) {
                         Image(systemName: "square.and.pencil")
@@ -993,7 +1285,7 @@ extension ChatView {
                 }
                 
                 // Layer 2: Centered Logo
-                OwlitLogo(size: 24)
+                OwlitLogo(size: 24, isDarkMode: isDarkMode)
             }
             .padding(.top, 8)
             .padding(.bottom, 12)
@@ -1045,19 +1337,108 @@ extension ChatView {
             
             // Sidebar Content
             VStack(alignment: .leading, spacing: 12) {
+                // Home (Landing Page)
+                Button(action: {
+                    triggerHaptic(style: .medium)
+                    showSideMenu = false
+                    onNavigateToHome?()
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "house")
+                            .font(.system(size: 10))
+                            .foregroundColor(themeText)
+                            .frame(width: 20, height: 20)
+                            .background(themeSecondaryBackground)
+                            .clipShape(Circle())
+                        
+                        Text("Home")
+                            .font(.custom("FKGroteskTrial-Regular", size: 12))
+                            .foregroundColor(themeText)
+                    }
+                }
+                
+                // Divider
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(height: 1)
+                
+                // My Shops (Same as Shop Icon)
+                Button(action: {
+                    triggerHaptic(style: .medium)
+                    showSideMenu = false
+                    openTopMerchantSummary()
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "storefront.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(themeText)
+                            .frame(width: 20, height: 20)
+                            .background(themeSecondaryBackground)
+                            .clipShape(Circle())
+                        
+                        Text("My Shops")
+                            .font(.custom("FKGroteskTrial-Regular", size: 12))
+                            .foregroundColor(themeText)
+                    }
+                }
+                
+                // Insights (Same as Analytics Icon)
+                Button(action: {
+                    triggerHaptic(style: .medium)
+                    showSideMenu = false
+                    showAnalyticsSheet = true
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chart.pie.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(themeText)
+                            .frame(width: 20, height: 20)
+                            .background(themeSecondaryBackground)
+                            .clipShape(Circle())
+                        
+                        Text("Insights")
+                            .font(.custom("FKGroteskTrial-Regular", size: 12))
+                            .foregroundColor(themeText)
+                    }
+                }
+
+                // Analytics
+                Button(action: {
+                    triggerHaptic(style: .medium)
+                    showSideMenu = false
+                    showLocalAnalytics = true
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chart.bar.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(themeText)
+                            .frame(width: 20, height: 20)
+                            .background(themeSecondaryBackground)
+                            .clipShape(Circle())
+                        
+                        Text("Analytics")
+                            .font(.custom("FKGroteskTrial-Regular", size: 12))
+                            .foregroundColor(themeText)
+                    }
+                }
+                
+                // Divider
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(height: 1)
+                
                 // Theme Toggle
                 Button(action: {
                     triggerHaptic(style: .medium)
                     isDarkMode.toggle()
                 }) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         Image(systemName: isDarkMode ? "sun.max" : "moon")
-                            .font(.system(size: 12))
+                            .font(.system(size: 10))
                             .foregroundColor(themeText)
-                            .frame(width: 24, height: 24)
+                            .frame(width: 20, height: 20)
                             .background(themeSecondaryBackground)
                             .clipShape(Circle())
-                            .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
                         
                         Text("Theme")
                             .font(.custom("FKGroteskTrial-Regular", size: 12))
@@ -1069,7 +1450,6 @@ extension ChatView {
                 Rectangle()
                     .fill(Color.gray.opacity(0.3))
                     .frame(height: 1)
-                    .padding(.trailing, 24) // Slight inset from right if needed, or just full width
                 
                 // Logout
                 Button(action: {
@@ -1077,14 +1457,13 @@ extension ChatView {
                     showSideMenu = false
                     authManager.logout()
                 }) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .font(.system(size: 12))
+                            .font(.system(size: 10))
                             .foregroundColor(.red)
-                            .frame(width: 24, height: 24)
+                            .frame(width: 20, height: 20)
                             .background(Color.red.opacity(0.1))
                             .clipShape(Circle())
-                            .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
                         
                         Text("Log out")
                             .font(.custom("FKGroteskTrial-Regular", size: 12))
@@ -1092,11 +1471,12 @@ extension ChatView {
                     }
                 }
             }
-            .fixedSize(horizontal: true, vertical: false) // Allow width to fit content
-            .background(Color.clear) // Transparent Background
-            .padding(.top, 60) // Offset to start below the Profile Photo (Header Height)
-            .padding(.leading, 20) // Align Icon center with Profile
-            .transition(.move(edge: .leading))
+            .padding(8) // Inner padding
+            .fixedSize(horizontal: true, vertical: false)
+            .ultraGlass(cornerRadius: 8)
+            .padding(.top, 50)
+            .padding(.leading, 20) // Restored original position
+            .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topLeading)))
         }
     }
 }
@@ -1672,6 +2052,13 @@ struct RecentChat: Codable, Identifiable {
 }
 
 struct HeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+struct WidthPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()

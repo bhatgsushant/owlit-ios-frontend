@@ -22,6 +22,8 @@ struct ScanReceiptView: View {
     @State private var errorMessage = ""
     @State private var showingDuplicateAlert = false
     @State private var duplicateReceiptId: String?
+    @State private var existingReceiptToEdit: ReceiptData?
+    @State private var showingExistingReceipt = false
     
     // Form States
     @State private var editedMerchant: String
@@ -43,10 +45,25 @@ struct ScanReceiptView: View {
     let textGray = Color.gray
     
     init(image: UIImage, data: ReceiptData) {
-        self.originalImage = image
+        print("🔍 ScanReceiptView Init: Image Size: \(image.size), Scale: \(image.scale)")
+        
+        let finalImage: UIImage
+        if image.cgImage == nil && image.ciImage == nil {
+             print("❌ WARNING: ScanReceiptView received empty/invalid UIImage")
+             // Try to recover from Singleton
+             if let recovered = ImageTransfer.shared.pendingImage {
+                 print("✅ ScanReceiptView: Recovered Image from Singleton in Init!")
+                 finalImage = recovered
+             } else {
+                 finalImage = image
+             }
+        } else {
+             finalImage = image 
+        }
+        self.originalImage = finalImage
+        
         _extractedData = State(initialValue: data)
         _editedMerchant = State(initialValue: data.merchantName ?? "")
-        
         // Date Parsing
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -111,12 +128,28 @@ struct ScanReceiptView: View {
             } message: {
                 Text(errorMessage)
             }
-            .alert("Duplicate Receipt", isPresented: $showingDuplicateAlert) {
-                Button("OK", role: .cancel) { 
-                    print("❌ Duplicate Blocked")
+            .alert("Receipt Already Found", isPresented: $showingDuplicateAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Replace", role: .destructive) {
+                    saveReceipt(duplicateAction: "replace")
+                }
+                Button("Edit Existing") {
+                    loadAndEditExistingReceipt()
                 }
             } message: {
-                Text("This receipt has already been saved and cannot be saved twice.")
+                Text("This receipt already exists in your account. You can cancel, replace the existing receipt, or edit the existing one.")
+            }
+            .sheet(isPresented: $showingExistingReceipt) {
+                if let existingReceipt = existingReceiptToEdit {
+                    ScanReceiptView(
+                        image: originalImage,
+                        data: existingReceipt,
+                        onSaveSuccess: { updatedData in
+                            self.onSaveSuccess?(updatedData)
+                            dismiss()
+                        }
+                    )
+                }
             }
             .onAppear(perform: loadInitialData)
         }
@@ -498,8 +531,88 @@ struct ScanReceiptView: View {
         editedTotal = sum
     }
     
+    func loadAndEditExistingReceipt() {
+        guard let existingId = duplicateReceiptId,
+              let token = authManager.token else {
+            print("❌ Missing duplicate receipt ID or token")
+            return
+        }
+        
+        print("📥 Loading existing receipt: \(existingId)")
+        
+        Task {
+            do {
+                let (data, response) = try await APIClient.shared.rawRequest(
+                    path: "/api/receipts/\(existingId)",
+                    token: token
+                )
+                
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("🔍 Fetch Receipt Response: Status \(httpResponse.statusCode)")
+                    
+                    if httpResponse.statusCode == 200 {
+                        // Parse the receipt data
+                        if let receiptJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            print("✅ Loaded existing receipt data")
+                            
+                            // Convert to ReceiptData
+                            var existingReceipt = ReceiptData()
+                            existingReceipt.existingReceiptId = receiptJson["id"] as? String
+                            existingReceipt.merchantName = receiptJson["merchant_name"] as? String
+                            existingReceipt.transactionDate = receiptJson["transaction_date"] as? String
+                            existingReceipt.totalAmount = receiptJson["total_amount"] as? Double
+                            existingReceipt.storeType = receiptJson["store_type"] as? String
+                            
+                            // Parse line items
+                            if let lineItemsJson = receiptJson["line_items"] as? [[String: Any]] {
+                                existingReceipt.lineItems = lineItemsJson.compactMap { itemJson in
+                                    guard let itemName = itemJson["item"] as? String ?? itemJson["name"] as? String else {
+                                        return nil
+                                    }
+                                    
+                                    let price = itemJson["price"] as? Double ?? 0.0
+                                    let quantity = itemJson["quantity"] as? Int ?? 1
+                                    let mainCategory = itemJson["mainCategory"] as? String ?? itemJson["main_category"] as? String
+                                    let subCategory = itemJson["subCategory"] as? String ?? itemJson["sub_category"] as? String
+                                    
+                                    return LineItem(
+                                        item: itemName,
+                                        price: price,
+                                        quantity: quantity,
+                                        mainCategory: mainCategory,
+                                        subCategory: subCategory
+                                    )
+                                }
+                            }
+                            
+                            await MainActor.run {
+                                self.existingReceiptToEdit = existingReceipt
+                                self.showingExistingReceipt = true
+                            }
+                        }
+                    } else {
+                        throw NSError(domain: "Network", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Failed to fetch receipt"])
+                    }
+                }
+            } catch {
+                print("❌ Error loading existing receipt: \(error)")
+                await MainActor.run {
+                    errorMessage = "Failed to load existing receipt: \(error.localizedDescription)"
+                    showingSaveError = true
+                }
+            }
+        }
+    }
+
+    
     func saveReceipt() {
-        saveReceipt(duplicateAction: nil)
+        // If we have an existingReceiptId, it's an explicit edit.
+        // We should automatically use 'replace' to ensure we update the record.
+        if extractedData.existingReceiptId != nil {
+            saveReceipt(duplicateAction: "replace")
+        } else {
+            saveReceipt(duplicateAction: nil)
+        }
     }
     
     func saveReceipt(duplicateAction: String? = nil) {
@@ -518,19 +631,54 @@ struct ScanReceiptView: View {
         finalData.originalImage = self.originalImage
         
         // 2. Encode Metadata
-        guard let jsonData = try? JSONEncoder().encode(finalData),
-              let jsonString = String(data: jsonData, encoding: .utf8),
-              let imageData = originalImage.jpegData(compressionQuality: 0.6) else {
+        do {
+            let jsonData = try JSONEncoder().encode(finalData)
+            guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+                print("❌ Failed to convert JSON data to string")
+                errorMessage = "Failed to process receipt data (Encoding Error)"
+                showingSaveError = true
+                isSaving = false
+                return
+            }
+            
+            // 3. Prepare Image (Optional if editing)
+            var imageData = originalImage.jpegData(compressionQuality: 0.6)
+            
+            // If failed to get data from local image object, try Singleton fallback
+            if imageData == nil {
+                if let recovered = ImageTransfer.shared.pendingImage {
+                    imageData = recovered.jpegData(compressionQuality: 0.6)
+                }
+            }
+            
+            // FINAL VALIDATION: Only block if it's a NEW receipt. 
+            // If we are UPDATING (existingReceiptId != nil), we can proceed without image data (the server keeps the existing one).
+            if imageData == nil && finalData.existingReceiptId == nil {
+                print("❌ Failed to process receipt image and no existing ID found")
+                errorMessage = "Failed to process receipt image. The image may be missing or invalid."
+                showingSaveError = true
+                isSaving = false
+                return
+            }
+            
+            // 4. Send Request
+            saveReceiptRequest(jsonString: jsonString, imageData: imageData, duplicateAction: duplicateAction, token: token, finalData: finalData)
+            
+        } catch {
+            print("❌ JSON Encoding Error: \(error)")
+            errorMessage = "Failed to encode receipt: \(error.localizedDescription)"
+            showingSaveError = true
             isSaving = false
             return
         }
-        
-        // 3. Prepare Params
+    }
+    
+    func saveReceiptRequest(jsonString: String, imageData: Data?, duplicateAction: String?, token: String, finalData: ReceiptData) {
         var params = ["receiptData": jsonString]
         if let action = duplicateAction {
             params["duplicateAction"] = action
         }
-        if let existingId = duplicateReceiptId {
+        if let existingId = duplicateReceiptId ?? finalData.existingReceiptId {
             params["existingReceiptId"] = existingId
         }
         
@@ -548,23 +696,32 @@ struct ScanReceiptView: View {
                 )
                 
                 if let httpResponse = response as? HTTPURLResponse {
+                    print("🔍 Save Receipt Response: Status \(httpResponse.statusCode)")
+                    
                     if httpResponse.statusCode == 200 || httpResponse.statusCode == 201 {
                          // Check for Loose Duplicate Flag in Response
-                        if let json = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
-                           let isLooseDup = json["is_potential_duplicate"] as? Bool,
-                           isLooseDup {
-                            finalData.isPotentialDuplicate = true
+                        var updatedData = finalData // Mutable Copy
+                        if let json = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any] {
+                             print("🔍 Save Response JSON: \(json)")
+                             if let isLooseDup = json["is_potential_duplicate"] as? Bool, isLooseDup {
+                                 print("⚠️ Server flagged as Loose Duplicate!")
+                                 updatedData.isPotentialDuplicate = true
+                             }
                         }
                         
                         await MainActor.run {
-                            self.onSaveSuccess?(finalData)
+                            self.onSaveSuccess?(updatedData)
                             isSaving = false
                             dismiss()
                         }
                     } else if httpResponse.statusCode == 409 {
-                        // Strict Block
+                        // Strict Block - Try to get existing ID for resolution
+                        let responseJson = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+                        let existingId = responseJson?["existingReceiptId"] as? String
+                        
                         await MainActor.run {
                             print("⛔️ Strict Duplicate Blocked (409)")
+                            self.duplicateReceiptId = existingId
                             isSaving = false
                             self.showingDuplicateAlert = true
                         }
@@ -581,9 +738,9 @@ struct ScanReceiptView: View {
                     showingSaveError = true
                 }
             }
-            }
         }
     }
+
     
     // MARK: - Utilities
     func hideKeyboard() {
@@ -765,3 +922,4 @@ struct ScanReceiptView: View {
             return []
         }
     }
+}

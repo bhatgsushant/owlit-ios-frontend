@@ -1,11 +1,7 @@
-	<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>GIDClientID</key>
-	<string>49889892103-ovn59eh79gd9csoqv9qnu3tqmc1e8mcd.apps.googleusercontent.com</string>
-	<key>NSCameraUsageDescription</key>
-	<string>The camera is used to scan grocery receipts and capture details for AI parsing.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -27,6 +23,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>GIDClientID</key>
+	<string>49889892103-ovn59eh79gd9csoqv9qnu3tqmc1e8mcd.apps.googleusercontent.com</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -37,6 +35,7 @@
 		<string>FKGroteskTrial-Regular.otf</string>
 		<string>FKGroteskTrial-Medium.otf</string>
 		<string>PPEditorialNew-Light.ttf</string>
+		<string>PlayfairDisplay-Regular.ttf</string>
 	</array>
 </dict>
 </plist>

@@ -2870,24 +2870,25 @@ app.get('/api/merchants/resolve', authenticateRequest, async (req, res) => {
   if (!name) return res.status(400).json({ error: "Missing 'name' parameter" });
 
   try {
-    // Search for the most frequent merchant matching the input name for this user
-    const query = `
-      SELECT merchant_name, COUNT(*) as count
-      FROM v_receipt_line_items_enriched
-      WHERE user_id = $1 AND merchant_name ILIKE $2
-      GROUP BY merchant_name
-      ORDER BY count DESC
-      LIMIT 1;
-    `;
-    const result = await pool.query(query, [userId, name]);
+    const { data, error } = await supabase
+      .from('v_receipt_line_items_enriched')
+      .select('merchant_name')
+      .eq('user_id', userId)
+      .ilike('merchant_name', `%${name}%`)
+      .limit(100); // Increased limit for better frequency matching
 
-    if (result.rows.length > 0) {
-      const bestName = result.rows[0].merchant_name;
-      // Return structured result used by iOS app
+    if (error) throw error;
+
+    if (data && data.length > 0) {
+      // Find the most frequent name manually from the sample
+      const counts = data.reduce((acc, row) => {
+        acc[row.merchant_name] = (acc[row.merchant_name] || 0) + 1;
+        return acc;
+      }, {});
+      const bestName = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
       return res.json({ id: bestName, display_name: bestName });
     }
 
-    // Fallback if not found
     return res.json({ id: name, display_name: name });
 
   } catch (err) {
@@ -2895,197 +2896,148 @@ app.get('/api/merchants/resolve', authenticateRequest, async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
+
+// GET /api/merchants/filtered-list (Populates dropdown)
+app.get('/api/merchants/filtered-list', authenticateRequest, async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const { data, error } = await supabase
+      .from('v_receipt_line_items_enriched')
+      .select('merchant_name')
+      .eq('user_id', userId);
+
+    if (error) throw error;
+
+    // Unique names sorted by frequency (DESC)
+    const counts = (data || []).reduce((acc, row) => {
+      acc[row.merchant_name] = (acc[row.merchant_name] || 0) + 1;
+      return acc;
+    }, {});
+
+    const sortedMerchants = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+    res.json(sortedMerchants);
+  } catch (err) {
+    console.error('Error fetching merchant list:', err);
+    res.status(500).json({ error: 'Failed' });
+  }
+});
 // --- Merchant Insights Endpoint ---
 app.get('/api/insights/merchant', authenticateRequest, async (req, res) => {
   const { merchant_name } = req.query;
   if (!merchant_name) return res.status(400).json({ error: 'Merchant name is required' });
 
-  // Get User ID from your auth middleware
   const userId = req.user.id;
-
-  // Decode and allow for simple fuzzy matching/names
   const merchantName = decodeURIComponent(merchant_name);
+  console.log(`📊 [Server] Merchant Insight request: ${merchantName} for user ${userId}`);
 
   try {
-    // 1. Period Stats (This Month, Prev Month, This Year, Prev Year)
-    // Uses Conditional Aggregation for efficiency (1 Query instead of 4)
-    const statsQuery = `
-      SELECT
-        COALESCE(SUM(CASE WHEN transaction_date >= date_trunc('month', CURRENT_DATE) THEN total_price ELSE 0 END), 0) as this_month,
-        COALESCE(SUM(CASE WHEN transaction_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '1 month' AND transaction_date < date_trunc('month', CURRENT_DATE) THEN total_price ELSE 0 END), 0) as prev_month,
-        COALESCE(SUM(CASE WHEN transaction_date >= date_trunc('year', CURRENT_DATE) THEN total_price ELSE 0 END), 0) as this_year,
-        COALESCE(SUM(CASE WHEN transaction_date >= date_trunc('year', CURRENT_DATE) - INTERVAL '1 year' AND transaction_date < date_trunc('year', CURRENT_DATE) THEN total_price ELSE 0 END), 0) as prev_year
-      FROM v_receipt_line_items_enriched
-      WHERE user_id = $1
-        AND merchant_name ILIKE $2
-    `;
+    const now = new Date();
+    // Use UTC for consistent month boundaries against DB dates
+    const startOfThisMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const startOfPrevMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const startOfThisYear = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+    const startOfPrevYear = new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 1));
 
-    // 2. Trend Graph (Weekly for last 12 weeks)
-    const trendQuery = `
-        SELECT
-            date_trunc('week', transaction_date) as period_start,
-            SUM(total_price) as total
-        FROM v_receipt_line_items_enriched
-        WHERE user_id = $1
-          AND merchant_name ILIKE $2
-          AND transaction_date >= CURRENT_DATE - INTERVAL '12 weeks'
-        GROUP BY period_start
-        ORDER BY period_start ASC
-    `;
-
-    // 3. Top Category (Highest Spend)
-    const topCatQuery = `
-      SELECT main_category, SUM(total_price) as spend
-      FROM v_receipt_line_items_enriched
-      WHERE user_id = $1 AND merchant_name ILIKE $2
-      GROUP BY main_category
-      ORDER BY spend DESC
-      LIMIT 1
-    `;
-
-    // 4. Top Item (Most Frequent)
-    const topItemQuery = `
-      SELECT item, COUNT(*) as freq
-      FROM v_receipt_line_items_enriched
-      WHERE user_id = $1 AND merchant_name ILIKE $2
-      GROUP BY item
-      ORDER BY freq DESC
-      LIMIT 1
-    `;
-
-    // 8. Store Main Category (General category for the merchant)
-    const storeCatQuery = `
-      SELECT store_main_category
-      FROM v_receipt_line_items_enriched
-      WHERE user_id = $1 AND merchant_name ILIKE $2
-      LIMIT 1
-    `;
-
-    // 5. Health Score (Healthy vs Unhealthy Percentage)
-    const healthQuery = `
-      SELECT
-        COUNT(CASE WHEN main_category IN ('fruit', 'vegetable', 'meat', 'poultry', 'seafood', 'dairy', 'health', 'fitness') THEN 1 END) as healthy_count,
-        COUNT(CASE WHEN main_category IN ('snacks', 'beverages', 'alcohol', 'fast_food', 'dessert') THEN 1 END) as unhealthy_count
-      FROM v_receipt_line_items_enriched
-      WHERE user_id = $1 AND merchant_name ILIKE $2
-    `;
-
-    // [New] 6. Contribution Percentage (Merchant vs Total Spending this Month)
-    // "How much of my monthly grocery budget goes to Tesco?"
-    const contribQuery = `
-      WITH monthly_totals AS (
-          SELECT
-              COALESCE(SUM(total_price), 0) AS total_spent
-          FROM v_receipt_line_items_enriched
-          WHERE user_id = $1
-            AND transaction_date >= date_trunc('month', CURRENT_DATE)
-            AND transaction_date <  date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
-      ),
-      merchant_month_totals AS (
-          SELECT
-              COALESCE(SUM(total_price), 0) AS merchant_spent
-          FROM v_receipt_line_items_enriched
-          WHERE user_id = $1
-            AND merchant_name ILIKE $2  -- Dynamic merchant name
-            AND transaction_date >= date_trunc('month', CURRENT_DATE)
-            AND transaction_date <  date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
-      )
-      SELECT
-          CASE 
-            WHEN total_spent > 0 THEN ROUND((merchant_spent / total_spent) * 100, 2) 
-            ELSE 0 
-          END AS contribution_percentage
-      FROM monthly_totals, merchant_month_totals;
-    `;
-
-    // [New] 7. Total Visit Count (This Month)
-    // "How many times have I visited this store this month?"
-    const visitQuery = `
-        SELECT COUNT(DISTINCT receipt_id) AS visit_count
-        FROM v_receipt_line_items_enriched
-        WHERE user_id = $1 
-          AND merchant_name ILIKE $2
-          AND transaction_date >= date_trunc('month', CURRENT_DATE)
-          AND transaction_date <  date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
-    `;
-
-    // Execute Parallel Queries
-    const [statsRes, trendRes, topCatRes, topItemRes, healthRes, contribRes, visitRes, storeCatRes] = await Promise.all([
-      pool.query(statsQuery, [userId, merchantName]),
-      pool.query(trendQuery, [userId, merchantName]),
-      pool.query(topCatQuery, [userId, merchantName]),
-      pool.query(topItemQuery, [userId, merchantName]),
-      pool.query(healthQuery, [userId, merchantName]),
-      pool.query(contribQuery, [userId, merchantName]),
-      pool.query(visitQuery, [userId, merchantName]),
-      pool.query(storeCatQuery, [userId, merchantName])
+    // parallel fetch: merchant specific items (last 13 months for trend) and total user spend (this month)
+    const [merchantItemsRes, totalSpendRes] = await Promise.all([
+      supabase
+        .from('v_receipt_line_items_enriched')
+        .select('transaction_date, total_price, main_category, item, store_main_category, receipt_id')
+        .eq('user_id', userId)
+        .ilike('merchant_name', merchantName)
+        .gte('transaction_date', startOfPrevYear.toISOString()),
+      supabase
+        .from('v_receipt_line_items_enriched')
+        .select('total_price')
+        .eq('user_id', userId)
+        .gte('transaction_date', startOfThisMonth.toISOString())
     ]);
 
-    // Extract Results
-    const stats = statsRes.rows[0];
-    const thisMonth = parseFloat(stats?.this_month || 0);
-    const prevMonth = parseFloat(stats?.prev_month || 0);
-    const thisYear = parseFloat(stats?.this_year || 0);
-    const prevYear = parseFloat(stats?.prev_year || 0);
+    if (merchantItemsRes.error) throw merchantItemsRes.error;
+    if (totalSpendRes.error) throw totalSpendRes.error;
 
-    // Calculate Percentage Changes (Handle division by zero)
+    const items = merchantItemsRes.data || [];
+    const totalUserSpendThisMonth = (totalSpendRes.data || []).reduce((sum, r) => sum + parseFloat(r.total_price || 0), 0);
+
+    // Initial values
+    let thisMonth = 0, prevMonth = 0, thisYear = 0, prevYear = 0;
+    let healthyCount = 0, unhealthyCount = 0;
+    const weeklyMap = {};
+    const categoryMap = {};
+    const itemMap = {};
+    const receiptIds = new Set();
+    let storeCategory = 'General';
+
+    const healthyCats = ['fruit', 'vegetable', 'meat', 'poultry', 'seafood', 'dairy', 'health', 'fitness'];
+    const unhealthyCats = ['snacks', 'beverages', 'alcohol', 'fast_food', 'dessert'];
+
+    items.forEach(row => {
+      const price = parseFloat(row.total_price || 0);
+      // Construct date as UTC to match startOf boundaries
+      const date = new Date(row.transaction_date + 'T00:00:00Z');
+      const cat = (row.main_category || '').toLowerCase();
+
+      // Period Stats
+      if (date >= startOfThisMonth) thisMonth += price;
+      else if (date >= startOfPrevMonth && date < startOfThisMonth) prevMonth += price;
+
+      if (date >= startOfThisYear) thisYear += price;
+      else if (date >= startOfPrevYear && date < startOfThisYear) prevYear += price;
+
+      // Trend (last 12 weeks)
+      const twelveWeeksAgo = new Date();
+      twelveWeeksAgo.setDate(twelveWeeksAgo.getDate() - (12 * 7));
+      if (date >= twelveWeeksAgo) {
+        // Simple weekly grouping: Sunday as start
+        const d = new Date(date);
+        d.setDate(d.getDate() - d.getDay()); // Start of week (Sunday)
+        const weekKey = d.toISOString().split('T')[0];
+        weeklyMap[weekKey] = (weeklyMap[weekKey] || 0) + price;
+      }
+
+      // Insights
+      categoryMap[row.main_category || 'Other'] = (categoryMap[row.main_category || 'Other'] || 0) + price;
+      itemMap[row.item || 'Unknown'] = (itemMap[row.item || 'Unknown'] || 0) + 1;
+      if (row.store_main_category) storeCategory = row.store_main_category;
+
+      if (healthyCats.includes(cat)) healthyCount++;
+      if (unhealthyCats.includes(cat)) unhealthyCount++;
+
+      if (date >= startOfThisMonth) {
+        receiptIds.add(row.receipt_id);
+      }
+    });
+
+    // Formatting outputs
+    const trendGraph = Object.keys(weeklyMap).sort().map(key => weeklyMap[key]);
+    const topCategory = Object.keys(categoryMap).reduce((a, b) => (categoryMap[a] > categoryMap[b] ? a : b), 'General');
+    const topItem = Object.keys(itemMap).reduce((a, b) => (itemMap[a] > itemMap[b] ? a : b), 'Unknown');
+
+    const totalHealth = healthyCount + unhealthyCount;
+    const healthyPerc = totalHealth > 0 ? Math.round((healthyCount / totalHealth) * 100) : 100;
+    const unhealthyPerc = totalHealth > 0 ? Math.round((unhealthyCount / totalHealth) * 100) : 0;
+
     const monthChange = prevMonth > 0 ? ((thisMonth - prevMonth) / prevMonth) * 100 : (thisMonth > 0 ? 100 : 0);
     const yearChange = prevYear > 0 ? ((thisYear - prevYear) / prevYear) * 100 : (thisYear > 0 ? 100 : 0);
+    const contributionPercentage = totalUserSpendThisMonth > 0 ? parseFloat(((thisMonth / totalUserSpendThisMonth) * 100).toFixed(2)) : 0;
 
-    // Trend
-    const trendGraph = trendRes.rows.map(r => parseFloat(r.total));
-
-    // Top Category
-    const topCategory = topCatRes.rows[0]?.main_category || 'General';
-
-    // Store Category
-    const storeCategory = storeCatRes.rows[0]?.store_main_category || topCategory; // Fallback to top category
-
-    // Top Item
-    const topItem = topItemRes.rows[0]?.item || 'Unknown';
-
-    // Health Score
-    const hCount = parseInt(healthRes.rows[0]?.healthy_count || 0);
-    const uCount = parseInt(healthRes.rows[0]?.unhealthy_count || 0);
-    const totalHealth = hCount + uCount;
-    const healthyPerc = totalHealth > 0 ? Math.round((hCount / totalHealth) * 100) : 100; // Default to 100% healthy if no data (optimistic)
-    const unhealthyPerc = totalHealth > 0 ? Math.round((uCount / totalHealth) * 100) : 0;
-
-    // Contribution & Visits
-    const contributionPercentage = parseFloat(contribRes.rows[0]?.contribution_percentage || 0);
-    const visitCount = parseInt(visitRes.rows[0]?.visit_count || 0);
-
-    // Construct the Response
     res.json({
       merchant: merchantName,
       category: storeCategory,
       period_stats: {
-        current_month: {
-          total: thisMonth,
-          percentage_change: monthChange
-        },
-        current_year: {
-          total: thisYear,
-          percentage_change: yearChange
-        },
-        previous_month: {
-          total: prevMonth,
-          percentage_change: null
-        }
+        current_month: { total: thisMonth, percentage_change: monthChange },
+        current_year: { total: thisYear, percentage_change: yearChange },
+        previous_month: { total: prevMonth, percentage_change: null }
       },
       trend_graph: trendGraph,
       insights: {
         top_category: topCategory,
         top_item: topItem,
-        health_score: {
-          healthy_percentage: healthyPerc,
-          unhealthy_percentage: unhealthyPerc
-        },
+        health_score: { healthy_percentage: healthyPerc, unhealthy_percentage: unhealthyPerc },
         contribution_percentage: contributionPercentage,
-        visit_count: visitCount
+        visit_count: receiptIds.size
       }
     });
-
   } catch (error) {
     console.error('❌ Error fetching merchant insights:', error);
     res.status(500).json({ error: `Failed to fetch merchant insights: ${error.message}` });
@@ -3652,27 +3604,18 @@ app.get('/api/insights/line-items', authenticateRequest, async (req, res) => {
   if (!merchant_id) return res.status(400).json({ error: "Missing 'merchant_id'" });
 
   try {
-    const query = `
-      SELECT 
-        transaction_date, 
-        merchant_name,
-        item,
-        unit_price,
-        quantity,
-        total_price, 
-        main_category,
-        sub_category
-      FROM v_receipt_line_items_enriched
-      WHERE user_id = $1 AND merchant_name ILIKE $2
-      ORDER BY transaction_date DESC;
-    `;
-    const result = await pool.query(query, [userId, merchant_id]);
+    const { data, error } = await supabase
+      .from('v_receipt_line_items_enriched')
+      .select('transaction_date, merchant_name, item, unit_price, quantity, total_price, main_category, sub_category')
+      .eq('user_id', userId)
+      .ilike('merchant_name', merchant_id)
+      .order('transaction_date', { ascending: false });
 
-    // Remap for frontend compatibility if needed, or rely on CodingKeys
-    // Frontend expects: price (unit), totalPrice
-    const mapped = result.rows.map(row => ({
+    if (error) throw error;
+
+    const mapped = data.map(row => ({
       ...row,
-      price: row.unit_price // Alias unit_price to price for frontend
+      price: row.unit_price
     }));
 
     res.json(mapped);
@@ -3685,25 +3628,16 @@ app.get('/api/insights/line-items', authenticateRequest, async (req, res) => {
 // --- Analytics: All Line Items (Enriched) ---
 app.get('/api/analytics/line-items', authenticateRequest, async (req, res) => {
   const userId = req.user.id;
+  console.log(`📊 [Server] Analytics request received for user: ${userId}`);
   try {
-    const query = `
-      SELECT 
-        transaction_date, 
-        merchant_name,
-        item,
-        normalized_name,
-        unit_price,
-        quantity,
-        total_price, 
-        main_category,
-        sub_category,
-        store_type
-      FROM v_receipt_line_items_enriched
-      WHERE user_id = $1
-      ORDER BY transaction_date DESC;
-    `;
-    const result = await pool.query(query, [userId]);
-    res.json(result.rows);
+    const { data, error } = await supabase
+      .from('v_receipt_line_items_enriched')
+      .select('transaction_date, merchant_name, item, normalized_name, unit_price, quantity, total_price, main_category, sub_category, store_type, receipt_id, store_main_category')
+      .eq('user_id', userId)
+      .order('transaction_date', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
   } catch (error) {
     console.error('Error fetching analytics line items:', error);
     res.status(500).json({ error: 'Failed to fetch analytics data.' });

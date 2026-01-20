@@ -103,7 +103,7 @@ struct AnalyticsDashboardView: View {
                             timeRange = value
                         }) {
                             Text(label)
-                                .font(.custom("FKGroteskTrial-Regular", size: 13))
+                                .font(.custom("FKGroteskTrial-Bold", size: 13))
                                 .foregroundColor(timeRange == value ? .white : Color.gray)
                                 .padding(.vertical, 6)
                                 .padding(.horizontal, 12)
@@ -145,8 +145,8 @@ struct AnalyticsDashboardView: View {
         VStack(alignment: .leading, spacing: 12) {
             customBarChart(
                 title: "Categories",
-                items: data.categories.prefix(6).map { ($0.label, $0.value) },
-                color: Color.blue
+                items: data.categories.prefix(6).map { ($0.label.uppercased(), $0.value) },
+                color: Color(hex: "FFF1F2")
             )
         }
         .padding()
@@ -169,7 +169,7 @@ struct AnalyticsDashboardView: View {
                          angularInset: 1.5
                      )
                      .cornerRadius(5)
-                     .foregroundStyle(by: .value("Category", item.label))
+                     .foregroundStyle(by: .value("Category", item.label.uppercased()))
                  }
                  .frame(height: 250)
                  .chartLegend(position: .bottom, spacing: 20)
@@ -178,7 +178,7 @@ struct AnalyticsDashboardView: View {
                  // Fallback for older iOS
                  ForEach(data.subCategories.prefix(5)) { item in
                       HStack {
-                          Text(item.label)
+                          Text(item.label.uppercased())
                               .font(.custom("FKGroteskTrial-Regular", size: 14))
                               .foregroundColor(.gray)
                           Spacer()
@@ -480,11 +480,7 @@ struct AnalyticsDashboardView: View {
              current.count += (item.quantity ?? 1)
              itemMap[itemName] = current
              
-             // Trend
-             if let dateStr = item.transactionDate, let date = parseDate(dateStr) {
-                 let key = formatDateForTrend(date, range: timeRange)
-                 trendMap[key, default: 0] += price
-             }
+             // Trend is now handled separately via AnalyticsManager.shared.computeMonthlyTrend()
          }
          
         // 3. Convert Maps to Sorted Arrays
@@ -509,8 +505,7 @@ struct AnalyticsDashboardView: View {
             )
         }.sorted { $0.total > $1.total }
         
-        let trend = trendMap.map { AnalyticsTrend(date: $0.key, value: $0.value) }
-            .sorted { $0.date < $1.date }
+         let trend = AnalyticsManager.shared.computeMonthlyTrend(months: 6)
             
         return AnalyticsOverview(
             categories: categories,

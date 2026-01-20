@@ -240,4 +240,23 @@ extension Color {
         }
         self.init(.sRGB, red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255)
     }
+    
+    static let emerald = Color(hex: "10B981")
+}
+// MARK: - 🕸️ Grid Pattern
+struct MeshGrid: Shape {
+    let spacing: CGFloat
+    
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        for y in stride(from: 0, to: rect.height, by: spacing) {
+            path.move(to: CGPoint(x: 0, y: y))
+            path.addLine(to: CGPoint(x: rect.width, y: y))
+        }
+        for x in stride(from: 0, to: rect.width, by: spacing) {
+            path.move(to: CGPoint(x: x, y: 0))
+            path.addLine(to: CGPoint(x: x, y: rect.height))
+        }
+        return path
+    }
 }

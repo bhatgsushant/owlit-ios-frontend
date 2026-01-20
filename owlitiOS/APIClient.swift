@@ -148,7 +148,7 @@ class APIClient {
     func uploadRequest(
         path: String,
         method: String = "POST",
-        data: Data,
+        data: Data?,
         fileName: String,
         fieldName: String = "file",
         mimeType: String,
@@ -183,7 +183,7 @@ class APIClient {
     }
     
     private func createMultipartBody(
-        data: Data,
+        data: Data?,
         boundary: String,
         fileName: String,
         fieldName: String,
@@ -203,11 +203,13 @@ class APIClient {
         }
         
         // Add File
-        body.append("--\(boundary + lineBreak)")
-        body.append("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(fileName)\"\(lineBreak)") 
-        body.append("Content-Type: \(mimeType + lineBreak + lineBreak)")
-        body.append(data)
-        body.append(lineBreak)
+        if let data = data, !data.isEmpty {
+            body.append("--\(boundary + lineBreak)")
+            body.append("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(fileName)\"\(lineBreak)")
+            body.append("Content-Type: \(mimeType + lineBreak + lineBreak)")
+            body.append(data)
+            body.append(lineBreak)
+        }
         
         // End Boundary
         body.append("--\(boundary)--\(lineBreak)")
@@ -260,7 +262,17 @@ class APIClient {
         
         let (data, response) = try await session.data(for: request)
         
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("🔍 [APIClient] Raw Analytics Response (first 500 chars): \(jsonString.prefix(500))...")
+        }
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        
+        if httpResponse.statusCode != 200 {
+            let body = String(data: data, encoding: .utf8) ?? "No body"
+            print("❌ [APIClient] Analytics Failed with Status \(httpResponse.statusCode). Body: \(body)")
             throw URLError(.badServerResponse)
         }
         
@@ -268,7 +280,7 @@ class APIClient {
             let decoder = JSONDecoder()
             return try decoder.decode([LineItem].self, from: data)
         } catch {
-            print("Analytics Line Items decoding error: \(error)")
+            print("❌ Analytics Line Items decoding error: \(error)")
             throw URLError(.cannotDecodeContentData)
         }
     }
@@ -316,9 +328,23 @@ class APIClient {
              throw NSError(domain: "API", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: errorDescription])
         }
         
+        if let jsonString = String(data: data, encoding: .utf8) {
+             print("DEBUG - Raw Summary JSON: \(jsonString)")
+        }
         return try JSONDecoder().decode(MerchantSummary.self, from: data)
     }
     
+    // MARK: - Filtered Merchants
+    func fetchFilteredMerchants(token: String) async throws -> [String] {
+        let (data, response) = try await rawRequest(path: "/api/merchants/filtered-list", token: token)
+        
+        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        
+        return try JSONDecoder().decode([String].self, from: data)
+    }
+
     // MARK: - Client-Side Aggregation (Fallback)
     func fetchAllReceipts(token: String) async throws -> [ReceiptData] {
         let (data, response) = try await rawRequest(path: "/api/receipts", token: token)
@@ -329,6 +355,19 @@ class APIClient {
         
         return try JSONDecoder().decode([ReceiptData].self, from: data)
     }
+
+    func deleteReceipt(receiptId: String, token: String) async throws {
+        let body: [String: String] = ["id": receiptId]
+        let bodyData = try JSONEncoder().encode(body)
+        
+        let (data, response) = try await rawRequest(path: "/api/receipts", method: "DELETE", body: bodyData, token: token)
+        
+        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+            print("❌ Delete Receipt Failed: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+            throw URLError(.badServerResponse)
+        }
+    }
+    
     // MARK: - Merchant Resolution
     // MARK: - Merchant Resolution
     func resolveMerchant(name: String, token: String) async throws -> MerchantResolution {
