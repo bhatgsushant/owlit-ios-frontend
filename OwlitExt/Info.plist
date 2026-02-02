@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<key>NSExtensionActivationRule</key>
+            <!-- Allow at least one image. MAX 1 for now. -->
+			<string>SUBQUERY(extensionItems, $extensionItem, SUBQUERY($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image").@count == 1).@count == 1</string>
+		</dict>
+
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.share-services</string>
+        <!-- Use PrincipalClass if you delete the Storyboard, but for now we keep Storyboard key and let ViewDidLoad override UI -->
+        <!-- Actually, if we use Storyboard, the PrincipalClass is often hidden or inferred. 
+             If we want to be safe, we can add PrincipalClass but keep Storyboard. 
+             But ShareViewController is the class. -->
+        <key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
+	</dict>
+</dict>
+</plist>

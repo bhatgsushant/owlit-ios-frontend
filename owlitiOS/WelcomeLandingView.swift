@@ -1,4 +1,3 @@
-
 import SwiftUI
 
 struct WelcomeLandingView: View {
@@ -28,10 +27,22 @@ struct WelcomeLandingView: View {
     @State private var chatInputText = ""
     @State private var keyboardHeight: CGFloat = 0
     
+    private var formattedCurrentDate: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMMM d | HH:mm"
+        return formatter.string(from: Date()).uppercased()
+    }
+    
     var body: some View {
         ZStack {
             // MARK: - 1. Deep Black Background
-            Color.black.ignoresSafeArea()
+            // MARK: - 1. Deep Premium Background
+            LinearGradient(
+                colors: [Color(hex: "0f1c2e"), Color(hex: "02050a")], // Dark Navy -> Almost Black
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
             
             // MARK: - 2. Vibrant Gradient Glow (The "Flow")
             gradientBackground
@@ -47,29 +58,24 @@ struct WelcomeLandingView: View {
                 Spacer()
                 
                 // Main Text Content
-                VStack(alignment: .leading, spacing: 32) {
-                    HStack {
-                        Spacer()
-                        OwlitLogo(size: 60, animateRainbow: shouldAnimate)
+                VStack(alignment: .leading, spacing: 60) {
+                    VStack(spacing: 8) {
+                        OwlitLogo(size: 50, animateRainbow: shouldAnimate)
                             .padding(.leading, -4)
-                        Spacer()
+                        
+                        Text("Owlit AI")
+                            .font(.custom("FKGroteskTrial-Bold", size: 40))
+                            .tracking(-1.5)
+                            .lineSpacing(-5)
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.white, .white.opacity(0.3)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
                     }
-                    
-                    // Mixed Styling for specific emphasis
-                    Group {
-                        Text("Scan. Save. Track.  ")
-                            .foregroundColor(.white.opacity(0.5)) +
-                        Text("Owlit")
-                            .foregroundColor(.white) +
-                        Text(" makes sense of every Grocery Receipt")
-                            .foregroundColor(.white.opacity(0.6))
-                    }
-                    .font(.custom("PlayfairDisplay-Medium", size: 38)) // Updated Font
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    // 3D Text Effect
-                    .shadow(color: .black.opacity(0.3), radius: 1, x: 1, y: 1) // Crisp Edge
-                    .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 10) // Ambient Lift
+                    .frame(maxWidth: .infinity) // Center the VStack in the parent
                     // Animation Modifiers
                     .opacity(isTextVisible ? 1 : 0)
                     .blur(radius: isTextVisible ? 0 : 10)
@@ -84,9 +90,22 @@ struct WelcomeLandingView: View {
                         }
                     }
                     
-                    Text("Welcome")
-                        .font(.system(size: 16, weight: .regular))
-                        .foregroundColor(.white.opacity(0.7))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(formattedCurrentDate)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.4))
+                            .tracking(0.5)
+                        
+                        if let user = auth.user, let name = user.bestDisplayName.components(separatedBy: " ").first, !name.isEmpty {
+                            Text("Welcome Back, \(name)")
+                                .font(.system(size: 16, weight: .regular))
+                                .foregroundColor(.white.opacity(0.7))
+                        } else {
+                            Text("Welcome!")
+                                .font(.system(size: 16, weight: .regular))
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                    }
                     
                     // Graph Area
                     WelcomeLineGraph(shouldAnimate: shouldAnimate)
@@ -311,23 +330,23 @@ struct WelcomeLandingView: View {
     
     var gradientBackground: some View {
         ZStack {
-            // Main Purple body
+            // Main Orange body
             Circle()
-                .fill(Color(hex: "8000FF")) // Purple
+                .fill(Color(hex: "FF4500")) // Orange Red
                 .frame(width: 400, height: 400)
                 .blur(radius: 90)
                 .offset(x: 100, y: 250)
             
-            // Secondary Light Purple highlight
+            // Secondary Gold/Yellow highlight
             Circle()
-                .fill(Color(hex: "BF00FF")) // Electric Purple
+                .fill(Color(hex: "FFD700")) // Gold
                 .frame(width: 300, height: 300)
                 .blur(radius: 80)
                 .offset(x: -50, y: 300)
             
-            // Deep Indigo/Purple undertone
+            // Deep Red/Brown undertone
             Circle()
-                .fill(Color(hex: "4B0082")) // Indigo
+                .fill(Color(hex: "8B0000")) // Dark Red
                 .frame(width: 400, height: 400)
                 .blur(radius: 100)
                 .offset(x: 0, y: 400)
@@ -407,30 +426,8 @@ struct WelcomeLandingView: View {
                 let (data, _) = try await APIClient.shared.uploadRequest(path: "/api/scan", data: imageData, fileName: "upload.jpg", mimeType: "image/jpeg", parameters: params, token: token)
                 var receipt = try JSONDecoder().decode(ReceiptData.self, from: data)
                 
-                // Auto-save logic
-                var saveParams = ["receiptData": ""]
-                if let jsonData = try? JSONEncoder().encode(receipt),
-                   let jsonString = String(data: jsonData, encoding: .utf8) {
-                    saveParams["receiptData"] = jsonString
-                }
-                
-                
-                let (authData, authResponse) = try await APIClient.shared.uploadRequest(path: "/api/receipts", data: imageData, fileName: "receipt.jpg", fieldName: "receiptImage", mimeType: "image/jpeg", parameters: saveParams, token: token)
-                
-                if let httpRes = authResponse as? HTTPURLResponse, httpRes.statusCode == 409 {
-                    // DUPLICATE DETECTED
-                    let responseJson = try? JSONSerialization.jsonObject(with: authData) as? [String: Any]
-                    let existingId = responseJson?["existingReceiptId"] as? String
-                    
-                    await MainActor.run {
-                        self.duplicateReceiptId = existingId
-                        self.pendingDuplicateReceipt = receipt
-                        self.pendingDuplicateImage = resizedImage
-                        self.isProcessing = false
-                        self.showingDuplicateAlert = true
-                    }
-                    return // Stop further success logic
-                }
+                // REMOVED AUTO-SAVE LOGIC
+                // We directly hand off the receipt to the RootView -> ChatView -> CryptoView for review.
                 
                 // MARK: - Success Handling
                 isFinished = true
@@ -569,7 +566,7 @@ struct ProcessingPopupView: View {
                             ZStack(alignment: .leading) {
                                 Capsule().fill(Color.white.opacity(0.1))
                                 Capsule()
-                                    .fill(LinearGradient(colors: [Color(hex: "DFFF00"), Color.green], startPoint: .leading, endPoint: .trailing))
+                                    .fill(LinearGradient(colors: [Color.blue, Color.purple], startPoint: .leading, endPoint: .trailing))
                                     .frame(width: min(geo.size.width, geo.size.width * progress))
                                     .animation(.spring(), value: progress)
                             }
@@ -648,3 +645,4 @@ struct WelcomeLineGraph: View {
         }
     }
 }
+

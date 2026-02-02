@@ -127,7 +127,11 @@ class AuthManager: ObservableObject {
                 throw NSError(domain: "APIError", code: statusCode, userInfo: [NSLocalizedDescriptionKey: "Failed to fetch user profile."])
             }
             
-            let fetchedUser = try JSONDecoder().decode(User.self, from: responseData)
+            // Decode on a background thread to prevent Main Thread hang
+            let fetchedUser = try await Task.detached(priority: .userInitiated) {
+                try JSONDecoder().decode(User.self, from: responseData)
+            }.value
+            
             self.user = fetchedUser
             self.isAuthenticated = true
             print("✅ Successfully refreshed user: \(fetchedUser.displayName ?? "Unknown")")

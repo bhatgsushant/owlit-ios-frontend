@@ -10,6 +10,11 @@ struct AnalyticsDashboardView: View {
     @State private var data: AnalyticsOverview?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var recentReceipts: [ReceiptData] = [
+        ReceiptData(id: "test-1", merchantName: "Test Store", transactionDate: "2025-01-01", totalAmount: 15.50)
+    ]
+    @State private var receiptToEdit: ReceiptData?
+    @State private var showEditSheet = false
     
     // Time Range Options
     let timeRanges = [
@@ -43,32 +48,74 @@ struct AnalyticsDashboardView: View {
                         Task { await loadData() }
                     }
                     Spacer()
-                } else if let data = data {
+                } else if !isLoading {
                     ScrollView {
                         VStack(spacing: 24) {
-                            // Category Drilldown (Bar Chart)
-                            categorySection(data)
+                            Text("Recent Receipts") // Added Title for clarity
+                                .font(.custom("FKGroteskTrial-Regular", size: 24))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
                             
-                            // Sub-category (Pie Chart - approximated with donut or list if simple)
-                            subCategorySection(data)
+                            // Recent Scanned Receipts (Moved to TOP)
+                            RecentReceiptsSection(
+                                receipts: recentReceipts, 
+                                onEdit: { receipt in self.receiptToEdit = receipt; self.showEditSheet = true },
+                                onDelete: { receipt in deleteReceipt(receipt.id) }
+                            )
                             
-                            // Timeline Spend (Line Chart)
-                            trendSection(data)
-                            
-                            // Top Merchants (Bar Chart)
-                            merchantSection(data)
-                            
-                            // Top Store Types (Bar Chart)
-                            storeTypeSection(data)
-                            
-                            // Top Items Table
-                            itemsButtomSheet(data)
+                            if let data = data {
+                                // Category Drilldown (Bar Chart)
+                                categorySection(data)
+                                
+                                // Sub-category (Pie Chart - approximated with donut or list if simple)
+                                subCategorySection(data)
+                                
+                                // Timeline Spend (Line Chart)
+                                trendSection(data)
+                                
+                                // Top Merchants (Bar Chart)
+                                merchantSection(data)
+                                
+                                // Top Store Types (Bar Chart)
+                                storeTypeSection(data)
+                                
+                                // Top Items Table
+                                itemsButtomSheet(data)
+                            } else if recentReceipts.isEmpty {
+                                // Show message if EVERYTHING is empty (and receipts also empty)
+                                Text("No analytics or receipts found.")
+                                    .foregroundColor(.gray)
+                                    .padding(.top, 50)
+                            }
                         }
                         .padding(.vertical, 20)
                         .padding(.horizontal, 16)
+                        .padding(.bottom, 50) // Extra padding for scrolling
                     }
                 }
             }
+        }
+
+        .sheet(isPresented: $showEditSheet) {
+            if var receipt = receiptToEdit {
+                 // Ensure ID is set for update
+                 let _ = { receipt.existingReceiptId = receipt.id }()
+                 ScanReceiptView(image: UIImage(), data: receipt) { _ in
+                     // Reload data on save
+                     Task { await loadData() }
+                 }
+            }
+        }
+        .alert("Delete Receipt", isPresented: $showDeleteAlert) {
+             Button("Cancel", role: .cancel) { }
+             Button("Delete", role: .destructive) {
+                 if let id = receiptIdToDelete {
+                     performDelete(id: id)
+                 }
+             }
+        } message: {
+             Text("Are you sure you want to delete this receipt? This action cannot be undone.")
         }
         .task {
             await loadData()
@@ -76,6 +123,7 @@ struct AnalyticsDashboardView: View {
         .onChange(of: timeRange) { _ in
             Task { await loadData() }
         }
+        .preferredColorScheme(.dark)
     }
     
     // MARK: - Header
@@ -131,6 +179,7 @@ struct AnalyticsDashboardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
             
+
             Text("Explore your highest-spend categories.")
                 .font(.custom("FKGroteskTrial-Regular", size: 15))
                 .foregroundColor(.gray)
@@ -372,23 +421,72 @@ struct AnalyticsDashboardView: View {
     private func loadData() async {
         isLoading = true
         errorMessage = nil
-        guard let token = authManager.token else { return }
+        guard let token = authManager.token else { 
+            print("❌ No token found in Analytics View")
+            isLoading = false
+            return 
+        }
         
-        do {
-            // 1. Fetch Enriched Line Items directly from View (supports normalized names)
-            let items = try await APIClient.shared.fetchAnalyticsLineItems(token: token)
+        // 1. Fetch Recent Receipts (Parallel)
+        if let token = authManager.token {
+            Task {
+                do {
+                    let receipts = try await APIClient.shared.fetchReceipts(token: token)
+                    await MainActor.run {
+                        self.recentReceipts = receipts
+                    }
+                } catch {
+                    print("Failed to fetch receipts for dashboard: \(error)")
+                }
+            }
+        }
+
+        // 2. Trigger Manager Refresh (Handles Disk Cache + Network)
+        try? await AnalyticsManager.shared.refreshData(token: token)
             
-            // 2. Process Data Locally
-            let processed = processLineItems(items, timeRange: timeRange)
+        // 3. Fetch Data from Manager (Single Source of Truth)
+        let items = AnalyticsManager.shared.allLineItems
+            
+        if items.isEmpty {
+            // Don't show error immediately, just set data nil so we can still show receipts
+            await MainActor.run {
+                self.data = nil
+                self.isLoading = false
+            }
+        } else {
+            // 4. Process Data
+            let processed = await Task.detached(priority: .userInitiated) {
+                return self.processLineItems(items, timeRange: self.timeRange)
+            }.value
             
             await MainActor.run {
                 self.data = processed
                 self.isLoading = false
             }
-        } catch {
-            await MainActor.run {
-                self.errorMessage = error.localizedDescription
-                self.isLoading = false
+        }
+    }
+    
+    // MARK: - State
+    @State private var receiptIdToDelete: String?
+    @State private var showDeleteAlert = false
+
+    private func deleteReceipt(_ id: String?) {
+        guard let id = id else { return }
+        self.receiptIdToDelete = id
+        self.showDeleteAlert = true
+    }
+
+    private func performDelete(id: String) {
+        guard let token = authManager.token else { return }
+        Task {
+            do {
+                try await APIClient.shared.deleteReceipt(receiptId: id, token: token)
+                // Remove locally
+                await MainActor.run {
+                    self.recentReceipts.removeAll { $0.id == id }
+                }
+            } catch {
+                print("Failed to delete receipt: \(error)")
             }
         }
     }
@@ -556,6 +654,7 @@ struct AnalyticsDashboardView: View {
         }
         return isoString
     }
+
 }
 
 // Preview

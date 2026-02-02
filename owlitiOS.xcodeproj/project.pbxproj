@@ -8,11 +8,27 @@
 
 /* Begin PBXBuildFile section */
 		C6120B722ECD241300A7C428 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = C6120B712ECD241300A7C428 /* Lottie */; };
+		C61470242F259565005042B5 /* OwlitScan.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C61470192F259565005042B5 /* OwlitScan.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C614703D2F2683BC005042B5 /* OwlitExt.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C61470332F2683BB005042B5 /* OwlitExt.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C6C82E262EC7F98300976527 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = C6C82E252EC7F98300976527 /* GoogleSignIn */; };
 		C6C82E282EC7F98300976527 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C6C82E272EC7F98300976527 /* GoogleSignInSwift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		C61470212F259565005042B5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C6C82DCA2EC6A71E00976527 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C61470182F259565005042B5;
+			remoteInfo = OwlitScan;
+		};
+		C614703B2F2683BB005042B5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C6C82DCA2EC6A71E00976527 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C61470322F2683BB005042B5;
+			remoteInfo = OwlitExt;
+		};
 		C6C82DE02EC6A71F00976527 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C6C82DCA2EC6A71E00976527 /* Project object */;
@@ -40,15 +56,52 @@
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C61470232F259565005042B5 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				C614703D2F2683BC005042B5 /* OwlitExt.appex in Embed Foundation Extensions */,
+				C61470242F259565005042B5 /* OwlitScan.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C614702A2F259FDE005042B5 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		C61470192F259565005042B5 /* OwlitScan.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OwlitScan.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C61470332F2683BB005042B5 /* OwlitExt.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OwlitExt.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C6C82DD22EC6A71E00976527 /* owlitiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = owlitiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C6C82DDF2EC6A71F00976527 /* owlitiOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = owlitiOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C6C82DE92EC6A71F00976527 /* owlitiOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = owlitiOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		C61470282F259565005042B5 /* Exceptions for "OwlitScan" folder in "OwlitScan" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C61470182F259565005042B5 /* OwlitScan */;
+		};
+		C61470412F2683BC005042B5 /* Exceptions for "OwlitExt" folder in "OwlitExt" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C61470322F2683BB005042B5 /* OwlitExt */;
+		};
 		C6C82E222EC7DC1500976527 /* Exceptions for "owlitiOS" folder in "owlitiOS" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -59,6 +112,22 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		C614701A2F259565005042B5 /* OwlitScan */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C61470282F259565005042B5 /* Exceptions for "OwlitScan" folder in "OwlitScan" target */,
+			);
+			path = OwlitScan;
+			sourceTree = "<group>";
+		};
+		C61470342F2683BB005042B5 /* OwlitExt */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C61470412F2683BC005042B5 /* Exceptions for "OwlitExt" folder in "OwlitExt" target */,
+			);
+			path = OwlitExt;
+			sourceTree = "<group>";
+		};
 		C6C82DD42EC6A71E00976527 /* owlitiOS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -80,6 +149,20 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		C61470162F259565005042B5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C61470302F2683BB005042B5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C6C82DCF2EC6A71E00976527 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -107,12 +190,22 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		C614702B2F25A082005042B5 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		C6C82DC92EC6A71E00976527 = {
 			isa = PBXGroup;
 			children = (
 				C6C82DD42EC6A71E00976527 /* owlitiOS */,
 				C6C82DE22EC6A71F00976527 /* owlitiOSTests */,
 				C6C82DEC2EC6A71F00976527 /* owlitiOSUITests */,
+				C614701A2F259565005042B5 /* OwlitScan */,
+				C61470342F2683BB005042B5 /* OwlitExt */,
+				C614702B2F25A082005042B5 /* Frameworks */,
 				C6C82DD32EC6A71E00976527 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -123,6 +216,8 @@
 				C6C82DD22EC6A71E00976527 /* owlitiOS.app */,
 				C6C82DDF2EC6A71F00976527 /* owlitiOSTests.xctest */,
 				C6C82DE92EC6A71F00976527 /* owlitiOSUITests.xctest */,
+				C61470192F259565005042B5 /* OwlitScan.appex */,
+				C61470332F2683BB005042B5 /* OwlitExt.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -130,6 +225,51 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		C61470182F259565005042B5 /* OwlitScan */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C61470252F259565005042B5 /* Build configuration list for PBXNativeTarget "OwlitScan" */;
+			buildPhases = (
+				C61470152F259565005042B5 /* Sources */,
+				C61470162F259565005042B5 /* Frameworks */,
+				C61470172F259565005042B5 /* Resources */,
+				C614702A2F259FDE005042B5 /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C614701A2F259565005042B5 /* OwlitScan */,
+			);
+			name = OwlitScan;
+			packageProductDependencies = (
+			);
+			productName = OwlitScan;
+			productReference = C61470192F259565005042B5 /* OwlitScan.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		C61470322F2683BB005042B5 /* OwlitExt */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C614703E2F2683BC005042B5 /* Build configuration list for PBXNativeTarget "OwlitExt" */;
+			buildPhases = (
+				C614702F2F2683BB005042B5 /* Sources */,
+				C61470302F2683BB005042B5 /* Frameworks */,
+				C61470312F2683BB005042B5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C61470342F2683BB005042B5 /* OwlitExt */,
+			);
+			name = OwlitExt;
+			packageProductDependencies = (
+			);
+			productName = OwlitExt;
+			productReference = C61470332F2683BB005042B5 /* OwlitExt.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		C6C82DD12EC6A71E00976527 /* owlitiOS */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = C6C82DF32EC6A71F00976527 /* Build configuration list for PBXNativeTarget "owlitiOS" */;
@@ -138,10 +278,13 @@
 				C6C82DCF2EC6A71E00976527 /* Frameworks */,
 				C6C82DD02EC6A71E00976527 /* Resources */,
 				C6120B6F2ECD214E00A7C428 /* Embed Frameworks */,
+				C61470232F259565005042B5 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				C61470222F259565005042B5 /* PBXTargetDependency */,
+				C614703C2F2683BB005042B5 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C6C82DD42EC6A71E00976527 /* owlitiOS */,
@@ -212,6 +355,12 @@
 				LastSwiftUpdateCheck = 2600;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
+					C61470182F259565005042B5 = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
+					C61470322F2683BB005042B5 = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
 					C6C82DD12EC6A71E00976527 = {
 						CreatedOnToolsVersion = 26.0.1;
 					};
@@ -247,11 +396,27 @@
 				C6C82DD12EC6A71E00976527 /* owlitiOS */,
 				C6C82DDE2EC6A71F00976527 /* owlitiOSTests */,
 				C6C82DE82EC6A71F00976527 /* owlitiOSUITests */,
+				C61470182F259565005042B5 /* OwlitScan */,
+				C61470322F2683BB005042B5 /* OwlitExt */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		C61470172F259565005042B5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C61470312F2683BB005042B5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C6C82DD02EC6A71E00976527 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -276,6 +441,20 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		C61470152F259565005042B5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C614702F2F2683BB005042B5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C6C82DCE2EC6A71E00976527 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -300,6 +479,16 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		C61470222F259565005042B5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C61470182F259565005042B5 /* OwlitScan */;
+			targetProxy = C61470212F259565005042B5 /* PBXContainerItemProxy */;
+		};
+		C614703C2F2683BB005042B5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C61470322F2683BB005042B5 /* OwlitExt */;
+			targetProxy = C614703B2F2683BB005042B5 /* PBXContainerItemProxy */;
+		};
 		C6C82DE12EC6A71F00976527 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = C6C82DD12EC6A71E00976527 /* owlitiOS */;
@@ -313,6 +502,126 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		C61470262F259565005042B5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = OwlitScan/OwlitScan.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WSQ76JM6K8;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = OwlitScan/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = OwlitScan;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = r.owlitiOS.OwlitScan;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C61470272F259565005042B5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = OwlitScan/OwlitScan.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WSQ76JM6K8;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = OwlitScan/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = OwlitScan;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = r.owlitiOS.OwlitScan;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C614703F2F2683BC005042B5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = OwlitExt/OwlitExt.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WSQ76JM6K8;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = OwlitExt/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = OwlitExt;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = r.owlitiOS.OwlitExt;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C61470402F2683BC005042B5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = OwlitExt/OwlitExt.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WSQ76JM6K8;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = OwlitExt/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = OwlitExt;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = r.owlitiOS.OwlitExt;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		C6C82DF12EC6A71F00976527 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -591,6 +900,24 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		C61470252F259565005042B5 /* Build configuration list for PBXNativeTarget "OwlitScan" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C61470262F259565005042B5 /* Debug */,
+				C61470272F259565005042B5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C614703E2F2683BC005042B5 /* Build configuration list for PBXNativeTarget "OwlitExt" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C614703F2F2683BC005042B5 /* Debug */,
+				C61470402F2683BC005042B5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		C6C82DCD2EC6A71E00976527 /* Build configuration list for PBXProject "owlitiOS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

@@ -57,7 +57,8 @@ struct ReceiptData: Codable, Identifiable, Equatable {
         case isPotentialDuplicate = "is_potential_duplicate"
     }
     
-    init(merchantName: String? = nil, transactionDate: String? = nil, totalAmount: Double? = 0, lineItems: [LineItem] = []) {
+    init(id: String? = nil, merchantName: String? = nil, transactionDate: String? = nil, totalAmount: Double? = 0, lineItems: [LineItem] = []) {
+        self.id = id
         self.merchantName = merchantName
         self.transactionDate = transactionDate
         self.totalAmount = totalAmount
@@ -183,11 +184,13 @@ struct StoreInfo: Codable, Identifiable {
     let id: String
     let merchantName: String
     let storeType: String?
+    let domain: String?
     
     enum CodingKeys: String, CodingKey {
         case id
         case merchantName = "merchant_name"
         case storeType = "store_type"
+        case domain
     }
 }
 

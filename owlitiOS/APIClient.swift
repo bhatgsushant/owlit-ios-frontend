@@ -278,7 +278,10 @@ class APIClient {
         
         do {
             let decoder = JSONDecoder()
-            return try decoder.decode([LineItem].self, from: data)
+            // Offload decoding to a background thread to prevent blocking the Main Thread
+            return try await Task.detached(priority: .userInitiated) {
+                try decoder.decode([LineItem].self, from: data)
+            }.value
         } catch {
             print("❌ Analytics Line Items decoding error: \(error)")
             throw URLError(.cannotDecodeContentData)
@@ -342,7 +345,9 @@ class APIClient {
             throw URLError(.badServerResponse)
         }
         
-        return try JSONDecoder().decode([String].self, from: data)
+        return try await Task.detached(priority: .userInitiated) {
+            try JSONDecoder().decode([String].self, from: data)
+        }.value
     }
 
     // MARK: - Client-Side Aggregation (Fallback)
@@ -353,7 +358,9 @@ class APIClient {
             throw URLError(.badServerResponse)
         }
         
-        return try JSONDecoder().decode([ReceiptData].self, from: data)
+        return try await Task.detached(priority: .userInitiated) {
+            try JSONDecoder().decode([ReceiptData].self, from: data)
+        }.value
     }
 
     func deleteReceipt(receiptId: String, token: String) async throws {
@@ -368,7 +375,39 @@ class APIClient {
         }
     }
     
-    // MARK: - Merchant Resolution
+    // MARK: - Store Info
+    func saveUserItemRename(itemName: String, normalizedName: String, token: String) async throws {
+        let body: [String: String] = [
+            "item_name": itemName,
+            "normalized_name": normalizedName
+        ]
+        let bodyData = try JSONEncoder().encode(body)
+        
+        let (_, response) = try await rawRequest(
+            path: "/api/user-item-name-preference",
+            method: "POST",
+            body: bodyData,
+            token: token
+        )
+        
+        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+    
+    func fetchStoreInfo(token: String) async throws -> [StoreInfo] {
+        let (data, response) = try await rawRequest(path: "/api/store-info", token: token)
+        
+        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        
+        // Offload decoding to background thread
+        return try await Task.detached(priority: .userInitiated) {
+            try JSONDecoder().decode([StoreInfo].self, from: data)
+        }.value
+    }
+
     // MARK: - Merchant Resolution
     func resolveMerchant(name: String, token: String) async throws -> MerchantResolution {
         // Construct URL safely

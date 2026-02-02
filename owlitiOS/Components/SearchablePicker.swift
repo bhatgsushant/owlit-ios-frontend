@@ -16,17 +16,20 @@ struct SearchablePicker: View {
     var displayIcon: (String) -> AnyView = { _ in AnyView(EmptyView()) } // Optional icon provider
     var onSelect: ((String) -> Void)? = nil
     var onCreate: ((String) -> Void)? = nil
+    var fontSize: CGFloat = 14 // Default font size
 
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
     @State private var searchText = ""
     @State private var isPresentingSheet = false
     
-    // Custom colors - Dark Mode
-    let cardBg = Color(hex: "111111")
-    let textWhite = Color.white
-    let textGray = Color.gray
-    let accentGreen = Color(hex: "27A565")
-    let sheetBg = Color.black // Pitch black for sheet
+    // Adaptive Colors
+    private var isDarkMode: Bool { colorScheme == .dark }
+    private var sheetBg: Color { isDarkMode ? Color.black : Color(hex: "F2F2F7") }
+    private var cardBg: Color { isDarkMode ? Color(hex: "1C1C1E") : Color.white }
+    private var primaryText: Color { isDarkMode ? Color.white : Color.black }
+    private var secondaryText: Color { isDarkMode ? Color.gray : Color.gray }
+    private var accentGreen: Color { Color(hex: "27A565") }
 
     var filteredOptions: [String] {
         if searchText.isEmpty {
@@ -45,18 +48,22 @@ struct SearchablePicker: View {
             isPresentingSheet = true
         }) {
             HStack {
-                displayIcon(selection).font(.system(size: 14))
+                displayIcon(selection).font(.system(size: fontSize))
                 
-                Text(selection.isEmpty ? placeholder : selection)
-                    .font(.custom("FKGroteskTrial-Regular", size: 14))
-                    .foregroundColor(selection.isEmpty ? textWhite.opacity(0.3) : textWhite)
-                    .lineLimit(1)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(selection.isEmpty ? placeholder : selection)
+                        .font(.system(size: fontSize, weight: .medium, design: .monospaced))
+                        .tracking(0.5)
+                        .foregroundColor(selection.isEmpty ? primaryText.opacity(0.3) : (isDarkMode ? primaryText.opacity(0.6) : primaryText.opacity(0.9)))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
                 
                 Spacer()
                 
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(textWhite.opacity(0.5))
+                    .foregroundColor(primaryText.opacity(0.5))
             }
             .contentShape(Rectangle()) // Make clickable area better
         }
@@ -79,8 +86,9 @@ struct SearchablePicker: View {
                                     Image(systemName: "plus.circle.fill")
                                         .foregroundColor(accentGreen)
                                     Text("Create \"\(searchText)\"")
-                                        .font(.custom("FKGroteskTrial-Medium", size: 16))
-                                        .foregroundColor(textWhite)
+                                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                        .tracking(0.5)
+                                        .foregroundColor(primaryText.opacity(0.8))
                                 }
                             }
                             .listRowBackground(cardBg)
@@ -94,12 +102,13 @@ struct SearchablePicker: View {
                             }) {
                                 HStack {
                                     displayIcon(option)
-                                        .foregroundColor(textWhite.opacity(0.7))
+                                        .foregroundColor(primaryText.opacity(0.7))
                                         .frame(width: 24)
                                     
                                     Text(option)
-                                        .font(.custom("FKGroteskTrial-Regular", size: 16))
-                                        .foregroundColor(textWhite)
+                                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                        .tracking(0.5)
+                                        .foregroundColor(primaryText.opacity(0.8))
                                     
                                     if selection == option {
                                         Spacer()
@@ -113,12 +122,12 @@ struct SearchablePicker: View {
                         
                         if filteredOptions.isEmpty && !showCreateOption {
                            Text("No options found")
-                               .foregroundColor(textGray)
+                               .foregroundColor(secondaryText)
                                .listRowBackground(Color.clear)
                         }
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden) // Important for custom bg
+                    .listStyle(.grouped) // Better for adaptive
+                    .scrollContentBackground(.hidden) 
                     .background(sheetBg)
                 }
                 .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(title.lowercased())...")
@@ -129,12 +138,12 @@ struct SearchablePicker: View {
                         Button("Cancel") {
                             isPresentingSheet = false
                         }
-                        .foregroundColor(textWhite)
+                        .foregroundColor(primaryText)
                     }
                 }
             }
             .presentationDetents([.medium, .large])
-            .preferredColorScheme(.dark)
+            // Removed .preferredColorScheme(.dark) to fix the bug
         }
     }
 }

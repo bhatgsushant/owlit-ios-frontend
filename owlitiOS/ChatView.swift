@@ -10,12 +10,16 @@ import SwiftUI
 struct ChatView: View {
     @Binding var pendingReceipt: ReceiptData? // Data from Landing Page
     @Binding var pendingQuestion: String? // Question from Landing Page
+    @Binding var pendingSharedImage: UIImage? // From Share Extension
+
     var onNavigateToHome: (() -> Void)? = nil
     
     // Default Init workaround if needed (optional)
-    init(pendingReceipt: Binding<ReceiptData?> = .constant(nil), pendingQuestion: Binding<String?> = .constant(nil), onNavigateToHome: (() -> Void)? = nil) {
+    // Default Init workaround if needed (optional)
+    init(pendingReceipt: Binding<ReceiptData?> = .constant(nil), pendingQuestion: Binding<String?> = .constant(nil), pendingSharedImage: Binding<UIImage?> = .constant(nil), onNavigateToHome: (() -> Void)? = nil) {
         self._pendingReceipt = pendingReceipt
         self._pendingQuestion = pendingQuestion
+        self._pendingSharedImage = pendingSharedImage
         self.onNavigateToHome = onNavigateToHome
     }
 
@@ -31,8 +35,12 @@ struct ChatView: View {
     @State private var isManualEntry = false
     @State private var editingMessageId: UUID? // Generic ID for message being edited
     
+    // Attached Image State (for share extension - attached to input box)
+    @State private var attachedImage: UIImage?
+    
     // UI Logic
     @State private var scanningSteps: [String] = []
+    @State private var scanProgress: Double = 0.0 // Added for consistent animation with WelcomeLandingView
     @State private var showSuccessPopup = false
     @State private var inputOverlayHeight: CGFloat = 110 // Default start height
     
@@ -54,8 +62,11 @@ struct ChatView: View {
     
     // Perplexity Header State
     @State private var activeTab: String = "chat" // chat, shop, analytics
-    @State private var showAnalyticsSheet = false // Re-enabled for in-app viewing
+
     @State private var showLocalAnalytics = false
+    @State private var showCrypto = false // Crypto Placeholder State
+    @State private var showHistory = false // History Page State
+    @State private var isEditingScan = false // State to toggle between Preview (Crypto) and Edit (ScanView)
     
     // Environment
     @Environment(\.openURL) var openURL
@@ -103,6 +114,17 @@ struct ChatView: View {
                 toastOverlay
                     .zIndex(4)
                 
+                // MARK: - Layer 4: Analytics Overlay
+                if showLocalAnalytics {
+                    Analytics(onMenuTap: {
+                        withAnimation { showSideMenu = true }
+                    }, onClose: {
+                        withAnimation { showLocalAnalytics = false }
+                    })
+                    .transition(.move(edge: .bottom))
+                    .zIndex(4.5)
+                }
+
                 // MARK: - Layer 5: Side Menu Overlay
                 if showSideMenu {
                     sideMenuView
@@ -134,7 +156,7 @@ struct ChatView: View {
             .background(
                 ZStack {
                     themeBackground
-                    MeshGrid(spacing: 5)
+                    MeshGrid(spacing: 8)
                         .stroke(gridLineColor, lineWidth: 0.5)
                 }
                 .ignoresSafeArea()
@@ -149,50 +171,104 @@ struct ChatView: View {
                     .transition(.opacity)
                     .zIndex(100)
             }
-        }
-        .fullScreenCover(isPresented: $showAnalyticsSheet) {
-            if let url = URL(string: "https://owlit.vercel.app/insights") {
-                 SafariView(url: url, token: nil)
-                     .ignoresSafeArea()
-            } else {
-                Text("Invalid URL")
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black)
-                    .onTapGesture { showAnalyticsSheet = false }
+            
+            // Shared Scanning Animation Overlay (From WelcomeLandingView)
+            if isProcessingImage {
+                ProcessingPopupView(steps: scanningSteps, progress: scanProgress)
+                    .zIndex(101) // Above everything
+                    .transition(.opacity)
             }
         }
-        .sheet(isPresented: $showLocalAnalytics) {
-            Analytics()
-                .presentationDetents([.fraction(0.85), .large])
+
+        .sheet(isPresented: $showCrypto) {
+            CryptoView(receiptData: nil, receiptImage: nil)
+                .presentationDetents([.large]) // Full screen sheet
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showHistory) {
+            ReceiptHistoryView()
+                .environmentObject(authManager)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+
         // Sheet for Receipt Review is top level logic
         .sheet(item: $scannedData) { data in
-            // For manual entry, we might not have a selectedImage, so we check data presence primary
-            ScanReceiptView(image: selectedImage ?? UIImage(), data: data) { savedReceipt in
-                // On Success: Update the existing message if we know which one
-                if let editingId = editingMessageId,
-                   let index = messages.firstIndex(where: { $0.id == editingId }) {
-                    
-                    // Update In-Place
-                    var updatedMsg = messages[index]
-                    updatedMsg.receiptData = savedReceipt
-                    
-                    withAnimation {
-                         messages[index] = updatedMsg
+            if isEditingScan {
+                ScanReceiptView(
+                    image: selectedImage ?? UIImage(), 
+                    data: data, 
+                    saveMode: .local,
+                    onSaveSuccess: { savedData in
+                        // On Edit Save:
+                        // We can either go back to Preview OR just Save/Finish.
+                        // User said: "edit button on receipt preview table... let edit the receipt".
+                        // Usually this implies saving changes updates the preview?
+                        // Let's assume on Edit Save, we update `scannedData` and go back to Preview.
+                        
+                        self.scannedData = savedData // Update local data
+                        self.isEditingScan = false // Go back to Preview
+                    },
+                    onCancel: {
+                         // User Cancelled Edit - Go back to Preview without changes
+                         print("↩️ User cancelled edit, returning to CryptoView preview")
+                         withAnimation {
+                            self.isEditingScan = false
+                         }
                     }
-                    self.editingMessageId = nil
-                } else {
-                    // Fallback (Should not happen in new flow)
-                    let summaryMsg = ChatMessage(content: "Receipt Saved", isUser: false, receiptData: savedReceipt)
-                    withAnimation {
-                        messages.append(summaryMsg)
+                )
+            } else {
+                CryptoView(
+                    receiptData: data, 
+                    receiptImage: selectedImage, 
+                    onConfirm: { finalData in
+                        // perform SAVE logic
+                        Task {
+                            guard let token = authManager.token else { return }
+                            
+                            var saveParams = ["receiptData": ""]
+                            if let jsonData = try? JSONEncoder().encode(finalData),
+                               let jsonString = String(data: jsonData, encoding: .utf8) {
+                                saveParams["receiptData"] = jsonString
+                            }
+                            
+                            let imageData = selectedImage?.jpegData(compressionQuality: 0.6)
+                            
+                            do {
+                                _ = try await APIClient.shared.uploadRequest(path: "/api/receipts", data: imageData, fileName: "receipt.jpg", fieldName: "receiptImage", mimeType: "image/jpeg", parameters: saveParams, token: token)
+                                
+                                await MainActor.run {
+                                    if let editingId = editingMessageId,
+                                       let index = messages.firstIndex(where: { $0.id == editingId }) {
+                                        var updatedMsg = messages[index]
+                                        updatedMsg.receiptData = finalData 
+                                        withAnimation { messages[index] = updatedMsg }
+                                        self.editingMessageId = nil
+                                    } else {
+                                        let summaryMsg = ChatMessage(content: "Receipt Saved", isUser: false, receiptData: finalData, image: selectedImage, style: .success)
+                                        withAnimation { messages.append(summaryMsg) }
+                                    }
+                                    
+                                    // Reset
+                                    self.scannedData = nil
+                                    self.selectedImage = nil
+                                }
+                            } catch {
+                                print("Save error: \(error)")
+                            }
+                        }
+                    },
+                    onEdit: {
+                        // Toggle Layout to Edit Mode
+                        self.isEditingScan = true
                     }
-                }
+                )
+
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
-                .environmentObject(authManager)
         }
+
         // Finance Sheet (Isolated to prevent conflict)
         .background(
             EmptyView()
@@ -223,9 +299,22 @@ struct ChatView: View {
                 self.pendingQuestion = nil
                 isInputFocused = false
             } else {
-                // Auto-focus input on appear only if no receipt/question ingestion occurred
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     isInputFocused = true
+                }
+            }
+            
+            // Check for Shared Image (App Group)
+            checkForSharedImage()
+        }
+        .onChange(of: pendingSharedImage) { newImage in
+             checkForSharedImage()
+        }
+        .onChange(of: isProcessingImage) { isProcessing in
+            // Clear attached image once processing actually starts
+            if isProcessing && attachedImage != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    self.attachedImage = nil
                 }
             }
         }
@@ -264,9 +353,6 @@ struct ChatView: View {
                     }
                     
                     // Spacer for input area - Reduced to tighten layout
-                    // Spacer for input area - Reduced to tighten layout
-                    // Scanning Progress (In-flow)
-                    scanningProgressSection
                     
                     // Spacer for input area - Dynamic Height + Safety Buffer
                     Color.clear.frame(height: inputOverlayHeight + 120).id("BOTTOM")
@@ -278,6 +364,8 @@ struct ChatView: View {
             .onChange(of: messages.count) { _ in
                 // Delay slightly to allow layout to settle
                 Task {
+                 
+                    
                     try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
                     await MainActor.run {
                         withAnimation {
@@ -337,7 +425,7 @@ struct ChatView: View {
                     onImageSelected: { image in handleImageSelection(image) },
                     onManualTap: { toggleManualMode() },
                     onInsightsTap: { showHealthOverview = true },
-
+                    attachedImage: $attachedImage,
                     isManualMode: isManualEntry,
                     isDarkMode: isDarkMode,
                     isFocused: $isInputFocused
@@ -460,83 +548,11 @@ struct ChatView: View {
         }
     }
     
-    private var scanningProgressSection: some View {
-        Group {
-            if !scanningSteps.isEmpty {
-                ScanningProgressView(steps: scanningSteps, isDarkMode: isDarkMode)
-                    .padding(.top, 8)
-                    .padding(.horizontal, 16)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .id("SCANNING_PROGRESS")
-            }
-        }
-    }
+
     
     // ... Subviews Definitions
     
-    struct ScanningProgressView: View {
-        let steps: [String]
-        var isDarkMode: Bool = true // Theme Prop
-        
-        var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                // Progress Bar
-                // Progress Bar Row with Animated Logo
-                HStack(spacing: 12) {
-                    OwlitLogo(size: 30, isScanning: true)
-                    
-                    // Modern Sleek Progress Bar
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            // Track
-                            Capsule()
-                                .fill((isDarkMode ? Color.white : Color.gray).opacity(isDarkMode ? 0.1 : 0.2))
-                                .frame(height: 10)
-                            
-                            // Indicator
-                            Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [Color(hex: "DFFF00"), Color.green]), // Yellowish-Green to Green
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(width: min(geometry.size.width, geometry.size.width * (Double(steps.count) / 8.0)), height: 10)
-                                .animation(.spring(response: 0.5, dampingFraction: 0.7), value: steps.count)
-                        }
-                    }
-                    .frame(height: 10)
-                }
-                .padding(.horizontal, 16)
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    if let activeStep = steps.last {
-                        HStack(spacing: 12) {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                                .tint(isDarkMode ? .white : .black)
-                            
-                            Text(activeStep)
-                                .font(.custom("FKGroteskTrial-Regular", size: 14))
-                                .foregroundColor(isDarkMode ? .white : .black)
-                        }
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 16)
-                        .background(isDarkMode ? Color(white: 0.12) : .white)
-                        .clipShape(Capsule())
-                        .id(activeStep) // Triggers transition on change
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .move(edge: .top).combined(with: .opacity)
-                        ))
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 16)
-            }
-        }
-    }
+
 
     struct SuccessOverlayView: View {
         @State private var confettiTrigger = false
@@ -594,6 +610,22 @@ struct ChatView: View {
     
     // MARK: - Logic & Handlers
     
+    func checkForSharedImage() {
+        if let image = pendingSharedImage {
+            print("🚀 ChatView: Attaching and Auto-Processing Shared Image from Extension")
+            // Attach image to input box for visual feedback
+            attachedImage = image
+            // Clear it so we don't re-trigger
+            self.pendingSharedImage = nil
+            // Automatically start processing the image (no need to hit send button)
+            // Small delay to ensure UI updates first so user sees the image attached
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.handleImageSelection(image)
+                // attachedImage will be cleared automatically when isProcessingImage becomes true
+            }
+        }
+    }
+    
     func loadRecentChats() {
         print("🚀 ChatView.onAppear triggered. Checking Auth...")
         if let user = authManager.user {
@@ -617,7 +649,11 @@ struct ChatView: View {
                 let duration = Date().timeIntervalSince(start)
                 print("✅ Fetched chats in \(String(format: "%.2f", duration))s")
                 
-                let chats = try JSONDecoder().decode([RecentChat].self, from: data)
+                // Decode on background thread
+                let chats = try await Task.detached(priority: .userInitiated) {
+                    try JSONDecoder().decode([RecentChat].self, from: data)
+                }.value
+                
                 await MainActor.run {
                     self.recentChats = Array(chats.prefix(5)) // Show top 5
                 }
@@ -630,20 +666,31 @@ struct ChatView: View {
     // Dynamically resolve and open the summary for the user's most frequent shop
     private func openTopMerchantSummary() {
         Task {
+            // OPTIMIZATION: Check Local Analytics Manager Cache First (Instant)
+            // This avoids the 1-second delay from network calls
+            if let topMerchant = AnalyticsManager.shared.getTopMerchantName() {
+                print("⚡️ [ChatView] Instant Local Hit for Top Merchant: \(topMerchant)")
+                await MainActor.run {
+                     self.selectedMerchantResolution = MerchantResolution(
+                        id: topMerchant.lowercased().filter { $0.isLetter || $0.isNumber }, 
+                        displayName: topMerchant
+                     )
+                }
+                return
+            }
+            
+            // Fallback: Network Request (If cache empty)
             guard let token = authManager.token else { return }
             
-            // 1. Fetch merchants sorted by frequency (DESC)
             do {
                 let merchants = try await APIClient.shared.fetchFilteredMerchants(token: token)
                 
                 if let topMerchant = merchants.first {
-                    // 2. Resolve name to structured resolution
                     let resolution = try await APIClient.shared.resolveMerchant(name: topMerchant, token: token)
                     await MainActor.run {
                         self.selectedMerchantResolution = resolution
                     }
                 } else {
-                    // Fallback if no history yet
                     await MainActor.run {
                         self.selectedMerchantResolution = MerchantResolution(id: "tesco", displayName: "Tesco")
                     }
@@ -679,10 +726,7 @@ struct ChatView: View {
         isProcessingImage = true
         isManualEntry = false
         scanningSteps = [] // Reset steps
-        
-        // Add initial user message (Image Only)
-        let userMsg = ChatMessage(content: "", isUser: true, image: image) // Empty content to hide text
-        messages.append(userMsg)
+        scanProgress = 0.0
         
         // Define steps
         let steps = [
@@ -705,26 +749,37 @@ struct ChatView: View {
         }
         
         Task {
-            // Simulator for Steps
+            // Simulator for Steps (Optimistic Progress)
             var isFinished = false
-            Task {
-                for (index, step) in steps.enumerated() {
-                    if isFinished { break }
-                    
-                    // Add step (shows as loading)
-                    await MainActor.run {
-                        withAnimation {
-                            scanningSteps.append(step)
-                        }
-                    }
-                    
-                    // Artificial delay for specific step
-                    try? await Task.sleep(nanoseconds: 800_000_000) // 0.8s per step
-                    
-                    // Keep the step as 'completed' (in this simple strings array, we render last as loading, others as done. Or just show all done.)
-                    // User wants: "when completed are ticked in green".
-                    // My implementation below handles this via index.
-                }
+            let progressTask = Task {
+                 // Phase 1: Milestones
+                 for (index, step) in steps.enumerated() {
+                     if isFinished { break }
+                     
+                     // Stop before final step to wait for API
+                     if index == steps.count - 1 { break }
+                     
+                     await MainActor.run {
+                         withAnimation {
+                             scanningSteps.append(step)
+                             self.scanProgress = Double(scanningSteps.count) / Double(steps.count)
+                         }
+                     }
+                     
+                     let delay = index < 3 ? 0.4 : 0.8
+                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                 }
+                 
+                 // Phase 2: The "Creep"
+                 while !isFinished && scanProgress < 0.99 {
+                     try? await Task.sleep(nanoseconds: 1_000_000_000)
+                     if isFinished { break }
+                     await MainActor.run {
+                         withAnimation(.linear(duration: 1.0)) {
+                             scanProgress += 0.01
+                         }
+                     }
+                 }
             }
             
             do {
@@ -732,49 +787,43 @@ struct ChatView: View {
                 let (data, _) = try await APIClient.shared.uploadRequest(path: "/api/scan", data: imageData, fileName: "upload.jpg", mimeType: "image/jpeg", parameters: params, token: token)
                 var receipt = try JSONDecoder().decode(ReceiptData.self, from: data)
                 
-                // AUTO-SAVE LOGIC
-                var finalMessage = "Receipt Scanned"
-                var saveParams = ["receiptData": ""]
+                // Attach image locally
+                receipt.originalImage = resizedImage
                 
-                if let jsonData = try? JSONEncoder().encode(receipt),
-                   let jsonString = String(data: jsonData, encoding: .utf8) {
-                    saveParams["receiptData"] = jsonString
+                // MARK: - Success Handling
+                isFinished = true
+                progressTask.cancel() // Stop the creeper
+                
+                // 1. Force Progress to 100%
+                await MainActor.run {
+                    // Ensure all previous steps are present
+                    if scanningSteps.count < steps.count - 1 {
+                        scanningSteps = Array(steps.dropLast())
+                    }
+                    withAnimation {
+                        if !scanningSteps.contains(steps.last!) {
+                            scanningSteps.append(steps.last!)
+                        }
+                        self.scanProgress = 1.0
+                    }
                 }
                 
-                // Save...
-                _ = try? await APIClient.shared.uploadRequest(path: "/api/receipts", data: imageData, fileName: "receipt.jpg", fieldName: "receiptImage", mimeType: "image/jpeg", parameters: saveParams, token: token)
-                
-                isFinished = true
+                // 2. Short visual pause
+                try? await Task.sleep(nanoseconds: 500_000_000)
                 
                 await MainActor.run {
                     self.isProcessingImage = false
-                    self.scanningSteps = [] // Clear steps (vanish)
-                    self.isInputFocused = false // Ensure keyboard stays collapsed
-                    self.showSuccessPopup = true // Show Success
+                    self.scanningSteps = [] // Clear steps
+                    self.isInputFocused = false
                     
-                    // Delay hiding popup and showing result
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        withAnimation {
-                            self.showSuccessPopup = false
-                            
-                            receipt.originalImage = resizedImage
-                            // Add final receipt message
-                            // Store image in ChatMessage as backup
-                            var successMsg = ChatMessage(
-                                content: "Receipt Successfully Saved",
-                                isUser: false,
-                                receiptData: receipt,
-                                image: resizedImage, // Backup Image
-                                style: .success
-                            )
-                            messages.append(successMsg)
-                            self.isInputFocused = false // Ensure keyboard is closed
-                        }
-                    }
+                    // Trigger Preview Sheet (CryptoView) instead of Auto-Save
+                    self.scannedData = receipt
+                    self.selectedImage = resizedImage
                 }
             } catch {
+                isFinished = true
+                progressTask.cancel()
                 await MainActor.run {
-                    isFinished = true
                     self.isProcessingImage = false
                     self.scanningSteps = []
                     self.isInputFocused = false
@@ -802,30 +851,17 @@ struct ChatView: View {
         
         print("🚀 ChatView.ingest: Final Image Present? \(imageToUse != nil)")
         
-        // 1. User Message (Image)
-        if let originalImage = imageToUse {
-            let userMsg = ChatMessage(content: "", isUser: true, image: originalImage)
-            withAnimation { messages.append(userMsg) }
-        } else {
-             let userMsg = ChatMessage(content: "Scanned Receipt", isUser: true)
-             withAnimation { messages.append(userMsg) }
-        }
-        
-        // 2. Success Message
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            withAnimation {
-                var fixedReceipt = receipt
-                fixedReceipt.originalImage = imageToUse // Ensure struct has it
-                
-                messages.append(ChatMessage(
-                    content: "Receipt Successfully Saved",
-                    isUser: false,
-                    receiptData: fixedReceipt,
-                    image: imageToUse, // Backup Image
-                    style: .success
-                ))
-                scrollTrigger += 1
-            }
+        // 2. Trigger Crypto Preview instead of saving to Chat
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+             withAnimation {
+                 var fixedReceipt = receipt
+                 fixedReceipt.originalImage = imageToUse // Ensure struct has it
+                 
+                 // Trigger Sheet
+                 self.selectedImage = imageToUse
+                 self.scannedData = fixedReceipt
+                 self.isEditingScan = false
+             }
         }
     }
     
@@ -846,6 +882,35 @@ struct ChatView: View {
     private func submitQuery(_ text: String) {
         hideKeyboard() // Dismiss keyboard immediately
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // If there's an attached image, handle it with the text
+        if let image = attachedImage {
+            // Create user message with both image and text
+            let userMsg = ChatMessage(
+                content: trimmed.isEmpty ? "" : trimmed,
+                isUser: true,
+                image: image
+            )
+            
+            // Clear suggestions from all previous messages
+            for index in messages.indices {
+                messages[index].suggestedQuestions = nil
+            }
+            
+            withAnimation {
+                messages.append(userMsg)
+                isLoading = true
+            }
+            
+            // Clear attached image
+            attachedImage = nil
+            
+            // Process image with optional text context
+            processImageWithText(image: image, text: trimmed)
+            return
+        }
+        
+        // No image attached - standard text-only flow
         guard !trimmed.isEmpty else { return }
         
         let userMsg = ChatMessage(content: trimmed, isUser: true)
@@ -868,6 +933,92 @@ struct ChatView: View {
         
         // Perform standard request
         performAIRequest(question: trimmed, isRetry: false)
+    }
+    
+    // New function to handle image + text submission
+    private func processImageWithText(image: UIImage, text: String) {
+        // If text is empty, treat it as a receipt scan (existing behavior)
+        if text.isEmpty {
+            handleImageSelection(image)
+            return
+        }
+        
+        // If text is provided, we'll process the image normally first
+        // Then send the text as a follow-up question after the image is processed
+        // Store the text to send after image processing
+        let questionToAsk = text
+        
+        // Process image first (this will show the receipt preview)
+        // We'll modify handleImageSelection to accept an optional callback
+        // For now, let's use a simpler approach: process image, then ask question
+        hideKeyboard()
+        selectedImage = image
+        isProcessingImage = true
+        isManualEntry = false
+        scanningSteps = []
+        
+        let steps = [
+            "Analyzing Image...",
+            "Processing Content...",
+            "Preparing Response..."
+        ]
+        
+        let resizedImage = image.resized(toMaxDimension: 1200)
+        
+        guard let token = authManager.token,
+              let imageData = resizedImage.jpegData(compressionQuality: 0.6) else {
+            isProcessingImage = false
+            return
+        }
+        
+        Task {
+            // Simulate steps for UX
+            for step in steps {
+                try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s per step
+                await MainActor.run {
+                    scanningSteps.append(step)
+                }
+            }
+            
+            do {
+                // Scan the image to get receipt data
+                let scanParams: [String: String] = [:]
+                let (scanData, _) = try await APIClient.shared.uploadRequest(
+                    path: "/api/scan",
+                    data: imageData,
+                    fileName: "receipt.jpg",
+                    fieldName: "file",
+                    mimeType: "image/jpeg",
+                    parameters: scanParams,
+                    token: token
+                )
+                
+                let receiptData = try JSONDecoder().decode(ReceiptData.self, from: scanData)
+                
+                await MainActor.run {
+                    self.scannedData = receiptData
+                    self.selectedImage = resizedImage
+                    self.isProcessingImage = false
+                    self.scanningSteps = []
+                    
+                    // Now automatically ask the question about the receipt
+                    // Add a small delay to ensure UI is updated
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        // Create a question that includes receipt context
+                        let contextualQuestion = "Based on this receipt from \(receiptData.merchantName ?? "the merchant"), \(questionToAsk)"
+                        self.performAIRequest(question: contextualQuestion, isRetry: false)
+                    }
+                }
+            } catch {
+                print("❌ Image processing error: \(error)")
+                await MainActor.run {
+                    isProcessingImage = false
+                    scanningSteps = []
+                    isLoading = false
+                    messages.append(ChatMessage(content: "Failed to process image. Please try again.", isUser: false))
+                }
+            }
+        }
     }
     
     private func regenerateAnswer(for message: ChatMessage) {
@@ -1131,26 +1282,27 @@ extension ChatView {
                         ZStack {
                             if activeTab == "chat" {
                                 Capsule()
-                                    .fill(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.05))
+                                    .fill(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.1)) // Darker Gray
                                     .padding(4)
                                     .matchedGeometryEffect(id: "activeTab", in: namespace)
                             }
                             OwlitLogo(size: 18, isDarkMode: isDarkMode)
                         }
-                        .frame(width: 80, height: 36) // Increased width
+                        .frame(width: 80, height: 36)
                     }
                     
                     Divider().frame(height: 14).background(Color.gray.opacity(0.3))
                     
                     // Segment 2: Shop Icon (Financial Summary)
                     Button(action: {
+                        withAnimation { activeTab = "shop" } // Fix: Update state
                         triggerHaptic(style: .light)
                         openTopMerchantSummary()
                     }) {
                         ZStack {
                             if activeTab == "shop" {
                                 Capsule()
-                                    .fill(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.05))
+                                    .fill(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.1)) // Darker Gray
                                     .padding(4)
                                     .matchedGeometryEffect(id: "activeTab", in: namespace)
                             }
@@ -1158,7 +1310,7 @@ extension ChatView {
                                 .font(.system(size: 14))
                                 .foregroundColor(activeTab == "shop" ? themeText : themeText.opacity(0.7))
                         }
-                        .frame(width: 80, height: 36) // Increased width
+                        .frame(width: 80, height: 36)
                     }
                     
                     Divider().frame(height: 14).background(Color.gray.opacity(0.3))
@@ -1166,13 +1318,12 @@ extension ChatView {
                     // Segment 3: Analytics Icon (External Insights)
                     Button(action: {
                         withAnimation { activeTab = "analytics" }
-                        // Open in app using SafariView
-                        showAnalyticsSheet = true
+                        withAnimation { showLocalAnalytics = true }
                     }) {
                         ZStack {
                             if activeTab == "analytics" {
                                 Capsule()
-                                    .fill(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.05))
+                                    .fill(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.1)) // Darker Gray
                                     .padding(4)
                                     .matchedGeometryEffect(id: "activeTab", in: namespace)
                             }
@@ -1180,10 +1331,10 @@ extension ChatView {
                                 .font(.system(size: 14))
                                 .foregroundColor(activeTab == "analytics" ? themeText : themeText.opacity(0.7))
                         }
-                        .frame(width: 80, height: 36) // Increased width
+                        .frame(width: 80, height: 36)
                     }
                 }
-                .background(isDarkMode ? Color(white: 0.15) : Color.gray.opacity(0.1))
+                .background(isDarkMode ? Color(white: 0.15) : Color.black.opacity(0.08)) // Darker Container Gray
                 .clipShape(Capsule())
                 .overlay(Capsule().stroke(Color.white.opacity(0.05), lineWidth: 1))
                 
@@ -1386,7 +1537,7 @@ extension ChatView {
                 Button(action: {
                     triggerHaptic(style: .medium)
                     showSideMenu = false
-                    showAnalyticsSheet = true
+                    withAnimation { showLocalAnalytics = true }
                 }) {
                     HStack(spacing: 8) {
                         Image(systemName: "chart.pie.fill")
@@ -1397,6 +1548,46 @@ extension ChatView {
                             .clipShape(Circle())
                         
                         Text("Insights")
+                            .font(.custom("FKGroteskTrial-Regular", size: 12))
+                            .foregroundColor(themeText)
+                    }
+                }
+
+                // History
+                Button(action: {
+                    triggerHaptic(style: .medium)
+                    showSideMenu = false
+                    showHistory = true
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 10))
+                            .foregroundColor(themeText)
+                            .frame(width: 20, height: 20)
+                            .background(themeSecondaryBackground)
+                            .clipShape(Circle())
+                        
+                        Text("History")
+                            .font(.custom("FKGroteskTrial-Regular", size: 12))
+                            .foregroundColor(themeText)
+                    }
+                }
+                
+                // Crypto (New)
+                Button(action: {
+                    triggerHaptic(style: .medium)
+                    showSideMenu = false
+                    showCrypto = true
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bitcoinsign.circle")
+                            .font(.system(size: 10))
+                            .foregroundColor(themeText)
+                            .frame(width: 20, height: 20)
+                            .background(themeSecondaryBackground)
+                            .clipShape(Circle())
+                        
+                        Text("Crypto")
                             .font(.custom("FKGroteskTrial-Regular", size: 12))
                             .foregroundColor(themeText)
                     }
@@ -1488,6 +1679,7 @@ struct ChatInputBar: View {
     var onImageSelected: (UIImage) -> Void
     var onManualTap: () -> Void
     var onInsightsTap: () -> Void
+    @Binding var attachedImage: UIImage? // Attached image from share extension
 
     var isManualMode: Bool // NEW
     var isDarkMode: Bool // For Theme
@@ -1502,6 +1694,44 @@ struct ChatInputBar: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
+                // Attached Image Preview (if any)
+                if let image = attachedImage {
+                    HStack(spacing: 8) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 60, height: 60)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Image attached")
+                                .font(.custom("FKGroteskTrial-Regular", size: 12))
+                                .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
+                            Text("Tap to remove")
+                                .font(.custom("FKGroteskTrial-Regular", size: 10))
+                                .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                        }
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            withAnimation {
+                                attachedImage = nil
+                            }
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(isDarkMode ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                }
+                
                 // 1. Text Field Area
                 TextField("Ask Anything...", text: $prompt)
                     .font(.custom("FKGroteskTrial-Regular", size: 16))
@@ -1511,6 +1741,13 @@ struct ChatInputBar: View {
                     .accentColor(isDarkMode ? .white : .black)
                     .submitLabel(.send)
                     .focused(isFocused)
+                    .onSubmit {
+                        // Allow sending even if prompt is empty when image is attached
+                        if !prompt.isEmpty || attachedImage != nil {
+                            onSubmit(prompt)
+                            prompt = ""
+                        }
+                    }
                 
                 // 2. Action Row (Below Text)
                 HStack(spacing: 2) {
@@ -1564,10 +1801,10 @@ struct ChatInputBar: View {
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.blue)
                             .frame(width: 32, height: 32)
-                            .background(prompt.isEmpty ? Color.gray.opacity(0.3) : (isDarkMode ? Color.white : Color.black))
+                            .background((prompt.isEmpty && attachedImage == nil) ? Color.gray.opacity(0.3) : (isDarkMode ? Color.white : Color.black))
                             .clipShape(Circle())
                     }
-                    .disabled(prompt.isEmpty)
+                    .disabled(prompt.isEmpty && attachedImage == nil)
                 }
             }
             .padding(12)

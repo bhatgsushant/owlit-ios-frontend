@@ -22,6 +22,8 @@ auth.js
 .env
 package-lock.json
 package.json
+service-account.json
+server/service-account.json
 
 # Fastlane
 fastlane/report.xml

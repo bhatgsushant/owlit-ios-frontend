@@ -10,12 +10,21 @@ import SwiftUI
 struct ScanReceiptView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var authManager: AuthManager
+    @Environment(\.colorScheme) var colorScheme
     
     // Inputs
     let originalImage: UIImage
     @State var extractedData: ReceiptData
     var onSaveSuccess: ((ReceiptData) -> Void)? // Callback
+    var onCancel: (() -> Void)? // Callback for cancellation
     
+    enum SaveMode {
+        case server
+        case local
+    }
+    // Safety: Default to local to prevent accidental uploads/duplicates from Scan Flow
+    var saveMode: SaveMode = .local
+
     // State
     @State private var isSaving = false
     @State private var showingSaveError = false
@@ -24,6 +33,7 @@ struct ScanReceiptView: View {
     @State private var duplicateReceiptId: String?
     @State private var existingReceiptToEdit: ReceiptData?
     @State private var showingExistingReceipt = false
+    @State private var showingDatePicker = false
     
     // Form States
     @State private var editedMerchant: String
@@ -36,17 +46,17 @@ struct ScanReceiptView: View {
     
     @State private var mainCategoryOptions: [String] = []
     @State private var subCategoryOptionsMap: [String: [String]] = [:]
+    @State private var storeTypeOptions: [String] = []
     
-    // UI Constants - Pitch Dark Theme
-    let mainBg = Color.black
-    let cardBg = Color(hex: "111111") // Dark card background
-    let accentGreen = Color(hex: "27A565") // Green
-    let textWhite = Color.white
-    let textGray = Color.gray
+    // UI Constants - Adaptive Theme
+    var mainBg: Color { colorScheme == .dark ? Color.black : Color(hex: "F7F5FF") }
+    var cardBg: Color { colorScheme == .dark ? Color(hex: "111111") : Color.white }
+    var accentGreen: Color { Color(hex: "27A565") }
+    var textPrimary: Color { colorScheme == .dark ? Color(hex: "E5E5E5") : Color.black }
+    var textSecondary: Color { Color.gray }
+    var strokeColor: Color { colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05) }
     
     init(image: UIImage, data: ReceiptData) {
-        print("🔍 ScanReceiptView Init: Image Size: \(image.size), Scale: \(image.scale)")
-        
         let finalImage: UIImage
         if image.cgImage == nil && image.ciImage == nil {
              print("❌ WARNING: ScanReceiptView received empty/invalid UIImage")
@@ -78,48 +88,99 @@ struct ScanReceiptView: View {
     }
     
     // Convenience init for optional callback
-    init(image: UIImage, data: ReceiptData, onSaveSuccess: ((ReceiptData) -> Void)? = nil) {
+    init(image: UIImage, data: ReceiptData, saveMode: SaveMode = .local, onSaveSuccess: ((ReceiptData) -> Void)? = nil, onCancel: (() -> Void)? = nil) {
         self.init(image: image, data: data)
+        self.saveMode = saveMode
         self.onSaveSuccess = onSaveSuccess
+        self.onCancel = onCancel
     }
     
     var body: some View {
         NavigationView {
             ZStack {
-                mainBg.ignoresSafeArea()
+                ZStack {
+                    mainBg
+                    
+                    MeshGrid(spacing: 4.5)
+                        .stroke(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03), lineWidth: 0.5)
+                }
+                .ignoresSafeArea()
                 
                 ScrollView {
                     VStack(spacing: 24) {
-                        duplicateBanner
+
+                        storeLogoView
                         headerSection
                         lineItemsSection
+                        
+                        // Spacer to push buttons down slightly
+                        Color.clear.frame(height: 20)
+                        
+                        // Bottom Action Buttons
+                        HStack(spacing: 12) {
+                            // Cancel (Nevermind Style)
+                            Button(action: {
+                                if let onCancel = onCancel {
+                                    onCancel()
+                                } else {
+                                    dismiss()
+                                }
+                            }) {
+                                Text("CANCEL")
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .tracking(0.5)
+                                    .foregroundColor(colorScheme == .dark ? .white.opacity(0.4) : .red)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 16)
+                                    .background(colorScheme == .dark ? Color(hex: "292929") : Color(hex: "F7F7F2"))
+                                    .cornerRadius(16)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(colorScheme == .dark ? Color.clear : .white, lineWidth: 1.5)
+                                    )
+                            }
+                            
+                            // Save (Primary Style)
+                            Button(action: saveReceipt) {
+                                Group {
+                                    if isSaving {
+                                        ProgressView()
+                                            .tint(colorScheme == .dark ? .black : .white)
+                                    } else {
+                                        Text("SAVE")
+                                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                            .tracking(0.5)
+                                            .foregroundColor(colorScheme == .dark ? .black.opacity(0.6) : .white.opacity(0.8))
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(colorScheme == .dark ? Color.orange : Color.black)
+                                .cornerRadius(16)
+                                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.2), radius: 8, x: 0, y: 4)
+                            }
+                            .disabled(isSaving)
+                            .opacity(isSaving ? 0.7 : 1.0)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 20)
                     }
-                    .padding(.vertical, 24)
+                    .padding(.top, 10)
+                    .padding(.bottom, 24)
                 }
                 .scrollDismissesKeyboard(.interactively) // Allow scrolling to dismiss
-                .background(mainBg)
                 .onTapGesture {
                     hideKeyboard()
                 }
             }
-            .navigationTitle("Refine Receipt")
+            // .navigationTitle("E D I T  R E C E I P T") // Replaced with ToolbarItem
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundColor(textWhite)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(action: saveReceipt) {
-                        if isSaving {
-                            ProgressView()
-                        } else {
-                            Text("Save")
-                                .font(.custom("FKGroteskTrial-Medium", size: 16))
-                                .foregroundColor(accentGreen)
-                        }
-                    }
-                    .disabled(isSaving)
+                ToolbarItem(placement: .principal) {
+                    Text("EDIT RECEIPT")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .tracking(0.5)
+                        .foregroundColor(colorScheme == .dark ? .white.opacity(0.4) : .black.opacity(0.6))
                 }
             }
             // Error/Alert Handling
@@ -144,6 +205,7 @@ struct ScanReceiptView: View {
                     ScanReceiptView(
                         image: originalImage,
                         data: existingReceipt,
+                        saveMode: .server, // Explicitly use server mode for existing receipts
                         onSaveSuccess: { updatedData in
                             self.onSaveSuccess?(updatedData)
                             dismiss()
@@ -151,240 +213,246 @@ struct ScanReceiptView: View {
                     )
                 }
             }
+            .sheet(isPresented: $showingDatePicker) {
+                VStack {
+                    DatePicker("Select Date", selection: $editedDate, displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                        .padding()
+                    
+                    Button("Done") {
+                        showingDatePicker = false
+                    }
+                    .font(.headline)
+                    .padding()
+                }
+                .presentationDetents([.medium])
+            }
             .onAppear(perform: loadInitialData)
         }
     }
     
     // MARK: - Sub Views
     
-    @ViewBuilder
-    var duplicateBanner: some View {
-        if let _ = extractedData.existingReceiptId {
-            // Scan-Time Warning
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(.yellow)
-                    .padding(.top, 2)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Duplicate Warning")
-                        .font(.custom("FKGroteskTrial-Bold", size: 14))
-                        .foregroundColor(.white)
-                    
-                    Text("This looks like a receipt you've already scanned.")
-                        .font(.custom("FKGroteskTrial-Regular", size: 13))
-                        .foregroundColor(.gray)
-                }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(hex: "1A1A1A"))
-            .cornerRadius(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.yellow.opacity(0.3), lineWidth: 1)
-            )
-            .padding(.horizontal, 16)
-        } else if extractedData.isPotentialDuplicate == true {
-             // Loose Fingerprint Info Banner
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "info.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(.blue)
-                    .padding(.top, 2)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Potential Duplicate")
-                        .font(.custom("FKGroteskTrial-Bold", size: 14))
-                        .foregroundColor(.white)
-                    
-                    Text("This receipt may be a duplicate of an earlier scan.")
-                        .font(.custom("FKGroteskTrial-Regular", size: 13))
-                        .foregroundColor(.gray)
-                }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(hex: "1A1A1A"))
-            .cornerRadius(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-            )
-            .padding(.horizontal, 16)
-        }
-    }
+
     
     var headerSection: some View {
-        // 1. Header Card (Store, Date, Type, Total)
-        VStack(alignment: .leading, spacing: 16) {
+        // 1. Header Card (Grid Only - Logo moved to top)
+        VStack(alignment: .leading, spacing: 12) {
             
-            // Store Name
-            VStack(alignment: .leading, spacing: 6) {
-                Text("STORE NAME")
-                    .font(.custom("FKGroteskTrial-Medium", size: 10))
-                    .tracking(2)
-                    .foregroundColor(textGray)
-                
-                HStack(spacing: 12) {
-            // Merchant Logo (Logo.dev)
-                    AsyncImage(url: URL(string: "https://img.logo.dev/\(cleanDomain(editedMerchant))?token=pk_Sa5pkb0QQ3CfQPaZgFE7jA&size=60&retina=true")) { phase in
-                        if let image = phase.image {
-                            image.resizable().aspectRatio(contentMode: .fit)
-                        } else if phase.error != nil || editedMerchant.isEmpty {
-                            // Fallback
-                            ZStack {
-                                Circle().fill(Color.gray.opacity(0.1))
-                                Text(editedMerchant.prefix(1).uppercased())
-                                    .font(.custom("FKGroteskTrial-Bold", size: 14)) // Changed to 14
-                                    .foregroundColor(textWhite)
-                            }
-                        } else {
-                            ProgressView()
-                        }
-                    }
-                    .frame(width: 40, height: 40)
-                    .background(Color.white.opacity(0.1))
-                    .clipShape(Circle())
-                    
-                    SearchablePicker(
-                        title: "Select Merchant",
-                        placeholder: "Store Name",
-                        selection: $editedMerchant,
-                        options: merchantNamesList,
-                        allowCreate: true,
-                        onSelect: { updateMerchantSelection($0) },
-                        onCreate: { updateMerchantSelection($0) }
-                    )
-                }
-                .padding(12)
-                .background(cardBg)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
-            }
-            
-            // Receipt Date
-            VStack(alignment: .leading, spacing: 6) {
-                Text("RECEIPT DATE")
-                    .font(.custom("FKGroteskTrial-Medium", size: 10))
-                    .tracking(2)
-                    .foregroundColor(textGray)
-                
-                HStack {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 14))
-                        .foregroundColor(textWhite)
-                    
-                    // Custom DatePicker with enforced Font Size 14
-                    // Custom DatePicker with enforced Font Size 14
-                    ZStack(alignment: .leading) {
-                        // 1. Visible Text with correct font (Background)
-                        Text(dateFormatter.string(from: editedDate))
-                            .font(.custom("FKGroteskTrial-Regular", size: 14))
-                            .foregroundColor(textWhite)
+                // Row 1: Store Name | Store Type
+                HStack(alignment: .top, spacing: 12) {
+                    // Store Name
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("STORE NAME")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .tracking(0.5)
+                            .foregroundColor(colorScheme == .dark ? .white.opacity(0.4) : .black.opacity(0.8))
                         
-                        // 2. Invisible interactive picker (Foreground)
-                        DatePicker("", selection: $editedDate, displayedComponents: .date)
-                            .labelsHidden()
-                            .colorScheme(.dark)
-                            .opacity(0.02) // Nearly invisible but touchable
+                        SearchablePicker(
+                            title: "Select Merchant",
+                            placeholder: "Store Name",
+                            selection: $editedMerchant,
+                            options: merchantNamesList,
+                            allowCreate: true,
+                            onSelect: { updateMerchantSelection($0) },
+                            onCreate: { updateMerchantSelection($0) },
+                            fontSize: 12
+                        )
+                        .padding(12)
+                        .frame(height: 50)
+                        .background(
+                            ZStack {
+                                cardBg
+                                MeshGrid(spacing: 2)
+                                    .stroke(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03), lineWidth: 0.5)
+                            }
+                        )
+                        .cornerRadius(16)
+                        .shadow(color: colorScheme == .dark ? Color.clear : Color.black.opacity(0.08), radius: 4, x: 0, y: 2)
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(strokeColor, lineWidth: 1))
                     }
+                    .frame(maxWidth: .infinity)
                     
-                    Spacer()
+                    // Store Type
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("TYPE")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .tracking(0.5)
+                            .foregroundColor(colorScheme == .dark ? .white.opacity(0.4) : .black.opacity(0.8))
+                        
+                        HStack(spacing: 4) {
+                            Image(systemName: "tag")
+                                .font(.system(size: 12))
+                                .foregroundColor(colorScheme == .dark ? textPrimary : .black)
+                                .rotationEffect(.degrees(90))
+                            
+                            SearchablePicker(
+                                title: "Type",
+                                placeholder: "Type",
+                                selection: Binding(
+                                    get: { editedStoreType.uppercased() },
+                                    set: { editedStoreType = $0 }
+                                ),
+                                options: (storeTypeOptions.isEmpty ? ["grocery", "restaurant", "retail", "fuel", "service", "medical", "transport", "other"] : storeTypeOptions).map { $0.uppercased() },
+                                allowCreate: true,
+                                onCreate: { saveStoreTypeOverride(merchant: editedMerchant, type: $0) },
+                                fontSize: 12
+                            )
+                        }
+                        .padding(12)
+                        .frame(height: 50)
+                        .frame(maxWidth: .infinity) // Make it flexible to match Store Name
+                        .background(
+                            ZStack {
+                                cardBg
+                                MeshGrid(spacing: 2)
+                                    .stroke(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03), lineWidth: 0.5)
+                            }
+                        )
+                        .cornerRadius(16)
+                        .shadow(color: colorScheme == .dark ? Color.clear : Color.black.opacity(0.08), radius: 4, x: 0, y: 2)
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(strokeColor, lineWidth: 1))
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(12)
-                .background(cardBg)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
-            }
             
-            // Store Type
-            VStack(alignment: .leading, spacing: 6) {
-                Text("STORE TYPE")
-                    .font(.custom("FKGroteskTrial-Medium", size: 10))
-                    .tracking(2)
-                    .foregroundColor(textGray)
-                
-                HStack {
-                    Image(systemName: "tag")
-                        .font(.system(size: 14))
-                        .foregroundColor(textWhite)
-                        .rotationEffect(.degrees(90))
+            // Row 2: Date | Total
+            HStack(alignment: .top, spacing: 12) {
+                // Receipt Date
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("DATE")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .tracking(0.5)
+                        .foregroundColor(colorScheme == .dark ? .white.opacity(0.4) : .black.opacity(0.8))
                     
-                    SearchablePicker(
-                        title: "Store Type",
-                        placeholder: "Type",
-                        selection: $editedStoreType,
-                        options: ["grocery", "restaurant", "retail", "fuel", "service", "medical", "transport", "other"],
-                        allowCreate: true,
-                        onCreate: { saveStoreTypeOverride(merchant: editedMerchant, type: $0) }
+                    Button(action: {
+                        showingDatePicker = true
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 14))
+                                .foregroundColor(textPrimary)
+                            
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                Text(dateFormatter.string(from: editedDate))
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .tracking(0.5)
+                                    .foregroundColor(colorScheme == .dark ? textPrimary.opacity(0.6) : .black.opacity(0.9))
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .frame(height: 50)
+                        .background(
+                            ZStack {
+                                cardBg
+                                MeshGrid(spacing: 2)
+                                    .stroke(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03), lineWidth: 0.5)
+                            }
+                        )
+                        .cornerRadius(16)
+                        .shadow(color: colorScheme == .dark ? Color.clear : Color.black.opacity(0.08), radius: 4, x: 0, y: 2)
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(strokeColor, lineWidth: 1))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                
+                // Total
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("TOTAL")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .tracking(0.5)
+                        .foregroundColor(colorScheme == .dark ? .white.opacity(0.4) : .black.opacity(0.8))
+                    
+                    HStack(spacing: 4) {
+                        Text("£")
+                            .font(.custom("BerkeleyMono-Regular", size: 14))
+                            .foregroundColor(accentGreen)
+                        
+                        TextField("0.00", value: $editedTotal, format: .number.precision(.fractionLength(2)))
+                            .keyboardType(.decimalPad)
+                            .font(.system(size: 14, weight: .medium, design: .monospaced)) // Apply monospaced system font
+                            .tracking(0.5) // Apply tracking
+                            .foregroundColor(colorScheme == .dark ? textPrimary.opacity(0.6) : .black.opacity(0.9)) // Apply reduced opacity
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .frame(height: 50)
+                    .background(
+                        ZStack {
+                            cardBg
+                            MeshGrid(spacing: 2)
+                                .stroke(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03), lineWidth: 0.5)
+                        }
                     )
+                    .cornerRadius(16)
+                    .shadow(color: colorScheme == .dark ? Color.clear : Color.black.opacity(0.08), radius: 4, x: 0, y: 2)
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(strokeColor, lineWidth: 1))
                 }
-                .padding(12)
-                .background(cardBg)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
-            }
-            
-            // Total
-            VStack(alignment: .leading, spacing: 6) {
-                Text("TOTAL")
-                    .font(.custom("FKGroteskTrial-Medium", size: 10))
-                    .tracking(2)
-                    .foregroundColor(textGray)
-                
-                HStack {
-                    Text("£")
-                        .font(.custom("BerkeleyMono-Regular", size: 14)) // Changed to 14
-                        .foregroundColor(accentGreen)
-                    
-                    TextField("0.00", value: $editedTotal, format: .number.precision(.fractionLength(2)))
-                        .keyboardType(.decimalPad)
-                        .font(.custom("BerkeleyMono-Regular", size: 14)) // Changed to 14
-                        .foregroundColor(textWhite)
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(cardBg)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
+                .frame(maxWidth: .infinity)
             }
         }
+
         .padding(20)
-        .background(Color(hex: "0A0A0A"))
+        .background(
+            colorScheme == .dark ? Color(hex: "1C1A22") : Color(hex: "F8F8F8")
+        )
         .cornerRadius(24)
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.12), radius: 8, x: 0, y: 4)
         .overlay(
             RoundedRectangle(cornerRadius: 24)
-                .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                .stroke(strokeColor, lineWidth: 1)
         )
         .padding(.horizontal, 16)
+    }
+    
+    var storeLogoView: some View {
+        HStack {
+            // Merchant Logo (Logo.dev)
+            let logoDomain = AnalyticsManager.shared.getDomain(for: editedMerchant) ?? cleanDomain(editedMerchant)
+            AsyncImage(url: URL(string: "https://img.logo.dev/\(logoDomain)?token=pk_Sa5pkb0QQ3CfQPaZgFE7jA&size=80&retina=true")) { phase in
+                if let image = phase.image {
+                    image.resizable().aspectRatio(contentMode: .fit)
+                } else if phase.error != nil || editedMerchant.isEmpty {
+                    // Fallback
+                    ZStack {
+                        Circle().fill(Color.gray.opacity(0.1))
+                        Text(editedMerchant.prefix(1).uppercased())
+                            .font(.custom("FKGroteskTrial-Bold", size: 18))
+                            .foregroundColor(textPrimary)
+                    }
+                } else {
+                    ProgressView()
+                }
+            }
+            .frame(width: 40, height: 40)
+            .background(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+            .clipShape(Circle())
+            .overlay(Circle().stroke(strokeColor, lineWidth: 1))
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.1), radius: 4, x: 0, y: 2)
+            
+            Spacer()
+        }
+        // .padding(.top, 10) // Removed to reduce header space
+        .padding(.leading, 20) // Align with card leading
     }
     
     var lineItemsSection: some View {
         VStack(spacing: 16) {
             // Header
             HStack {
-                Text("Line Items")
-                    .font(.custom("FKGroteskTrial-Regular", size: 18))
-                    .foregroundColor(textWhite)
+                Text("LINE ITEMS")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .tracking(0.5)
+                    .foregroundColor(colorScheme == .dark ? .white.opacity(0.4) : .black.opacity(0.8))
                 
                 Spacer()
                 
                 Button(action: {
-                    extractedData.lineItems.append(LineItem(item: "New Item", price: 0.0, quantity: 1, mainCategory: "other", subCategory: "miscellaneous"))
+                    extractedData.lineItems.insert(LineItem(item: "New Item", price: 0.0, quantity: 1, mainCategory: "other", subCategory: "miscellaneous"), at: 0)
                 }) {
                     Image(systemName: "plus.circle")
                         .font(.system(size: 22))
@@ -396,7 +464,7 @@ struct ScanReceiptView: View {
             
             // List
             VStack(spacing: 16) {
-                ForEach($extractedData.lineItems) { $item in
+                ForEach(Array($extractedData.lineItems.enumerated()), id: \.element.id) { index, $item in
                     ReceiptLineItemRow(
                         item: $item,
                         mainCategoryOptions: mainCategoryOptions,
@@ -411,9 +479,48 @@ struct ScanReceiptView: View {
                             saveUserCategoryPreference(item: item, main: main, sub: sub)
                         }
                     )
+                    
+                    // Separator with Serial Number (Always show, acts as footer for the item)
+                    HStack(spacing: 12) {
+                        DashedLine()
+                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [4]))
+                            .frame(height: 1)
+                            .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.2)) // Lighter in Dark Mode, Subtler in Light
+                        
+                        Text("\(index + 1)")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .tracking(0.5)
+                            .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.4) : Color.black.opacity(0.4))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+                            )
+                        
+                        DashedLine()
+                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [4]))
+                            .frame(height: 1)
+                            .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.2)) // Lighter in Dark Mode, Subtler in Light
+                    }
+                    .padding(.vertical, 8)
                 }
             }
-            .padding(.bottom, 100)
+            .padding(20)
+            .background(
+                colorScheme == .dark ? Color(hex: "1C1A22") : Color(hex: "FDFCFA")
+            )
+            .cornerRadius(24)
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.12), radius: 8, x: 0, y: 4)
+            .overlay(
+                RoundedRectangle(cornerRadius: 24)
+                    .stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.white, lineWidth: 1.5)
+            )
+            .padding(.horizontal, 16)
+
+        }
+        .onChange(of: extractedData.lineItems) { _ in
+            recalculateTotal()
         }
     }
     
@@ -474,6 +581,15 @@ struct ScanReceiptView: View {
                      print("⚠️ Failed to decode categories. Raw bytes: \(data.count)")
                 }
             } catch { print("❌ Failed categories: \(error)") }
+            
+
+            
+            // Load Store Types (From AnalyticsManager which aggregates API + History)
+            await AnalyticsManager.shared.ensureDataLoaded()
+            let types = AnalyticsManager.shared.getAvailableStoreTypes()
+            await MainActor.run {
+                self.storeTypeOptions = types
+            }
         }
     }
     
@@ -505,7 +621,11 @@ struct ScanReceiptView: View {
             if let t = match.storeType {
                 editedStoreType = t
             }
-            // Logic to update logo etc
+        }
+        
+        // Auto-fill Store Type from AnalyticsManager (History Priority)
+        if let type = AnalyticsManager.shared.getStoreCategory(for: new) {
+             editedStoreType = type.lowercased()
         }
     }
     
@@ -606,10 +726,20 @@ struct ScanReceiptView: View {
 
     
     func saveReceipt() {
-        // If we have an existingReceiptId, it's an explicit edit.
-        // We should automatically use 'replace' to ensure we update the record.
-        if extractedData.existingReceiptId != nil {
+        // If we have an existingReceiptId...
+        if let dupId = extractedData.existingReceiptId {
+            
+            // If we are in .local mode (Initial Scan), we must prompt the user.
+            if saveMode == .local {
+                duplicateReceiptId = dupId
+                showingDuplicateAlert = true
+                return
+            }
+            
+            // If we are in .server mode (e.g., explicit Edit Existing flow), 
+            // we treat this as an intentional update (Replace).
             saveReceipt(duplicateAction: "replace")
+            
         } else {
             saveReceipt(duplicateAction: nil)
         }
@@ -661,8 +791,16 @@ struct ScanReceiptView: View {
                 return
             }
             
-            // 4. Send Request
-            saveReceiptRequest(jsonString: jsonString, imageData: imageData, duplicateAction: duplicateAction, token: token, finalData: finalData)
+            // 4. Send Request or Save Local
+            print("🛑 Debug: ScanReceiptView.saveReceipt called. Mode: \(saveMode)")
+            if saveMode == .local {
+                print("💾 Saving Locally (No Upload)")
+                self.onSaveSuccess?(finalData)
+                isSaving = false
+                // Do NOT dismiss here. Parent (ChatView) handles state switch back to Preview.
+            } else {
+                saveReceiptRequest(jsonString: jsonString, imageData: imageData, duplicateAction: duplicateAction, token: token, finalData: finalData)
+            }
             
         } catch {
             print("❌ JSON Encoding Error: \(error)")
@@ -766,10 +904,14 @@ struct ScanReceiptView: View {
         let onDelete: () -> Void
         let onUpdateCategory: (String, String?, String) -> Void
         
-        // Colors
-        let cardBg = Color(hex: "111111")
-        let textWhite = Color.white
-        let textGray = Color.gray
+        @Environment(\.colorScheme) var colorScheme
+        
+        // Colors - Adaptive
+        var cardBg: Color { colorScheme == .dark ? Color(hex: "111111") : Color.white }
+        var rowBg: Color { colorScheme == .dark ? Color(hex: "0A0A0A") : Color.white }
+        var textPrimary: Color { colorScheme == .dark ? Color(hex: "E5E5E5") : Color.black }
+        var textSecondary: Color { Color.gray }
+        var strokeColor: Color { colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05) }
         
         // Focus State
         enum Field: Hashable {
@@ -778,140 +920,167 @@ struct ScanReceiptView: View {
         @FocusState private var focusedField: Field?
         
         var body: some View {
-            VStack(alignment: .leading, spacing: 12) {
-                itemNameView
-                priceQuantityRow
-                categorySection
-                deleteButton
-            }
-            .padding(16)
-            .background(Color(hex: "0A0A0A"))
-            .cornerRadius(20)
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
-            )
-            .padding(.horizontal, 16)
-        }
-        
-        private var itemNameView: some View {
-            TextField("Item Name", text: $item.item)
-                .font(.custom("FKGroteskTrial-Regular", size: 14))
-                .foregroundColor(textWhite)
-                .focused($focusedField, equals: .name)
-                .submitLabel(.next)
-                .onSubmit { focusedField = .price }
-                .padding(12)
-                .background(cardBg)
-                .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
-        }
-        
-        private var priceQuantityRow: some View {
-            HStack(spacing: 12) {
-                // Price
-                HStack {
-                    Text("£")
-                        .font(.custom("BerkeleyMono-Regular", size: 14))
-                        .foregroundColor(textGray)
-                    TextField("0.00", value: $item.price, format: .number.precision(.fractionLength(2)))
-                        .keyboardType(.decimalPad)
-                        .focused($focusedField, equals: .price)
-                        .font(.custom("BerkeleyMono-Regular", size: 14))
-                        .foregroundColor(textWhite)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity)
-                .background(cardBg)
-                .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
-                
-                // Qty
-                TextField("1", value: $item.quantity, format: .number)
-                    .keyboardType(.numberPad)
-                    .focused($focusedField, equals: .quantity)
-                    .font(.custom("BerkeleyMono-Regular", size: 14))
-                    .foregroundColor(textWhite)
-                    .padding(12)
-                    .frame(maxWidth: .infinity)
-                    .background(cardBg)
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.white.opacity(0.05), lineWidth: 1)
+            VStack(alignment: .leading, spacing: 8) {
+                // Row 1: Item Name | Qty | Price | Delete
+                HStack(spacing: 8) {
+                    // Name
+                    TextField("Item Name", text: $item.item)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .tracking(0.5)
+                        .foregroundColor(colorScheme == .dark ? textPrimary.opacity(0.6) : .black.opacity(0.9))
+                        .focused($focusedField, equals: .name)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .quantity }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 12)
+                        .background(
+                            ZStack {
+                                cardBg
+                                MeshGrid(spacing: 2)
+                                    .stroke(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03), lineWidth: 0.5)
+                            }
+                        )
+                        .cornerRadius(12)
+                        .shadow(color: colorScheme == .dark ? Color.clear : Color.black.opacity(0.06), radius: 3, x: 0, y: 1)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(strokeColor, lineWidth: 1))
+                        .layoutPriority(1)
+                    
+                    // Quantity (Moved to Row 1)
+                    TextField("1", value: $item.quantity, format: .number)
+                        .keyboardType(.numberPad)
+                        .focused($focusedField, equals: .quantity)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .tracking(0.5)
+                        .foregroundColor(colorScheme == .dark ? textPrimary.opacity(0.6) : .black.opacity(0.9))
+                        .multilineTextAlignment(.center)
+                        .frame(width: 40)
+                        .padding(.vertical, 10)
+                        .background(
+                            ZStack {
+                                cardBg
+                                MeshGrid(spacing: 2)
+                                    .stroke(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03), lineWidth: 0.5)
+                            }
+                        )
+                        .cornerRadius(12)
+                        .shadow(color: colorScheme == .dark ? Color.clear : Color.black.opacity(0.06), radius: 3, x: 0, y: 1)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(strokeColor, lineWidth: 1))
+                    
+                    // Price
+                    HStack(spacing: 2) {
+                        Text("£")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundColor(colorScheme == .dark ? textSecondary.opacity(0.4) : .black.opacity(0.7))
+                        TextField("0.00", value: $item.price, format: .number.precision(.fractionLength(2)))
+                            .keyboardType(.decimalPad)
+                            .focused($focusedField, equals: .price)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .tracking(0.5)
+                            .foregroundColor(colorScheme == .dark ? textPrimary.opacity(0.6) : .black.opacity(0.9))
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 8)
+                    .frame(width: 85)
+                    .background(
+                        ZStack {
+                            cardBg
+                            MeshGrid(spacing: 2)
+                                .stroke(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03), lineWidth: 0.5)
+                        }
                     )
-            }
-        }
-        
-        private var categorySection: some View {
-            VStack(spacing: 8) {
-                // Main Category
-                VStack(spacing: 0) {
+                    .cornerRadius(12)
+                    .shadow(color: colorScheme == .dark ? Color.clear : Color.black.opacity(0.06), radius: 3, x: 0, y: 1)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(strokeColor, lineWidth: 1))
+                    
+                    // Delete Button
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color.red.opacity(0.8)) // Slightly more visible
+                            .frame(width: 32, height: 32)
+                            .background(cardBg)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(strokeColor, lineWidth: 1))
+                            .shadow(color: colorScheme == .dark ? Color.clear : Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                    }
+                }
+                
+                // Row 2: Main Category | Sub Category
+                HStack(spacing: 8) {
+                    // Main Category
                     SearchablePicker(
                         title: "Category",
                         placeholder: "Category",
                         selection: Binding(
-                            get: { item.mainCategory ?? "" },
-                            set: { item.mainCategory = $0 }
+                            get: { (item.mainCategory ?? "").uppercased() },
+                            set: { 
+                                item.mainCategory = $0
+                                item.subCategory = "" // Reset selection
+                            }
                         ),
-                        options: mainCategoryOptions,
+                        options: mainCategoryOptions.map { $0.uppercased() },
                         allowCreate: true,
                         displayIcon: { CategoryIconMapper.view(for: $0) },
-                        onCreate: { _ in }
+                        onCreate: { _ in },
+                        fontSize: 12
                     )
-                }
-                .padding(12)
-                .background(cardBg)
-                .cornerRadius(20)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
-                .onTapGesture { focusedField = nil }
-                
-                // Sub Category
-                VStack(spacing: 0) {
+                    .padding(.vertical, 8) // Reduced padding for compact picker
+                    .padding(.horizontal, 8)
+                    .background(
+                        ZStack {
+                            cardBg
+                            MeshGrid(spacing: 2)
+                                .stroke(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03), lineWidth: 0.5)
+                        }
+                    )
+                    .cornerRadius(12) // Match others
+                    .shadow(color: colorScheme == .dark ? Color.clear : Color.black.opacity(0.06), radius: 3, x: 0, y: 1)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(strokeColor, lineWidth: 1))
+                    .frame(maxWidth: .infinity)
+
+                    // Sub Category
                     SearchablePicker(
                         title: "Subcategory",
                         placeholder: "Subcategory",
                         selection: Binding(
-                            get: { item.subCategory ?? "" },
+                            get: { (item.subCategory ?? "").uppercased() },
                             set: {
                                 item.subCategory = $0
                                 onUpdateCategory(item.item, item.mainCategory, $0)
                             }
                         ),
-                        options: getSubOptions(for: item.mainCategory),
+                        options: getSubOptions(for: item.mainCategory).map { $0.uppercased() },
                         allowCreate: true,
                         displayIcon: { CategoryIconMapper.view(for: $0) },
-                        onCreate: { _ in }
+                        onCreate: { _ in },
+                        fontSize: 12
                     )
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 8)
+                    .background(
+                        ZStack {
+                            cardBg
+                            MeshGrid(spacing: 2)
+                                .stroke(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03), lineWidth: 0.5)
+                        }
+                    )
+                    .cornerRadius(12)
+                    .shadow(color: colorScheme == .dark ? Color.clear : Color.black.opacity(0.06), radius: 3, x: 0, y: 1)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke((item.subCategory ?? "").isEmpty ? Color.yellow.opacity(0.8) : strokeColor, lineWidth: (item.subCategory ?? "").isEmpty ? 1.5 : 1))
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(12)
-                .background(cardBg)
-                .cornerRadius(20)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                )
-                .onTapGesture { focusedField = nil }
             }
-        }
-        
-        private var deleteButton: some View {
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.system(size: 14))
-                    .foregroundColor(Color.red.opacity(0.6))
-                    .padding(.top, 4)
-            }
-            .frame(maxWidth: .infinity)
+//            .padding(12) // Removed inner padding (handled by parent)
+//            .background(
+//                colorScheme == .dark ? Color(hex: "1C1C1E") : Color(hex: "F8F8F8")
+//            )
+//            .cornerRadius(16)
+//            .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+//            .overlay(
+//                RoundedRectangle(cornerRadius: 16)
+//                    .stroke(strokeColor, lineWidth: 1)
+//            )
+//            .padding(.horizontal, 16)
         }
         
         func getSubOptions(for main: String?) -> [String] {
@@ -920,6 +1089,15 @@ struct ScanReceiptView: View {
             if let subs = subCategoryOptionsMap[main] { return subs }
             if let subs = subCategoryOptionsMap[key] { return subs }
             return []
+        }
+    }
+
+    struct DashedLine: Shape {
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            path.move(to: CGPoint(x: 0, y: 0))
+            path.addLine(to: CGPoint(x: rect.width, y: 0))
+            return path
         }
     }
 }

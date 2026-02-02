@@ -29,8 +29,8 @@ struct FinancialSummaryView: View {
         self.merchantId = merchantId
         self.merchantName = merchantName
         _currentMerchantName = State(initialValue: merchantName)
-        // Initialize with just the current one until fetched
         _availableMerchants = State(initialValue: [merchantName])
+        print("DEBUG FinancialSummaryView[Init]: name=[\(merchantName)]")
     }
     
     // State
@@ -87,7 +87,7 @@ struct FinancialSummaryView: View {
                 }
             }
         }
-        .task {
+        .task(id: merchantName) {
             await loadData()
         }
     }
@@ -119,10 +119,29 @@ struct FinancialSummaryView: View {
             await fetchUserMerchants(token: token)
             
             // 3. Compute Summary locally for the current merchant
-            // We use the merchantName passed in or the one selected from dropdown
-            let targetMerchant = currentMerchantName
+            // HARDEN: Use the reactive currentMerchantName if it exists, otherwise fall back to the property
+            let targetMerchant = (currentMerchantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) 
+                ? merchantName.trimmingCharacters(in: .whitespacesAndNewlines)
+                : currentMerchantName.trimmingCharacters(in: .whitespacesAndNewlines)
             
-            guard let localSummary = AnalyticsManager.shared.computeMerchantSummary(merchantName: targetMerchant) else {
+            if targetMerchant.isEmpty {
+                 print("❌ [FinancialSummaryView] Error: Both currentMerchantName and merchantName are empty!")
+                 errorMessage = "System Error: Missing store name"
+                 isLoading = false
+                 return
+            }
+            
+            print("DEBUG FinancialSummaryView[Load]: target=[\(targetMerchant)], itemsCount=\(AnalyticsManager.shared.allLineItems.count)")
+            
+            // Re-sync local state if we had to use the property
+            if currentMerchantName != targetMerchant {
+                await MainActor.run { self.currentMerchantName = targetMerchant }
+            }
+            
+            // Try to compute (Manager now does fuzzy matching + canonical fallback)
+            let manager = AnalyticsManager.shared
+            guard let localSummary = manager.computeMerchantSummary(merchantName: targetMerchant) else {
+                print("DEBUG FinancialSummaryView[Error]: Failed lookup for [\(targetMerchant)] among \(manager.allLineItems.count) items.")
                 errorMessage = "No data found for \(targetMerchant)"
                 isLoading = false
                 return
@@ -143,9 +162,71 @@ struct FinancialSummaryView: View {
             
         } catch {
              print("Error updating local analytics: \(error)")
-             errorMessage = error.localizedDescription
+             if !AnalyticsManager.shared.allLineItems.isEmpty {
+                 print("✅ [FinancialSummaryView] Using cached data despite error.")
+                 // Retry logic flow with cached data
+                 // We need to re-run the summary computation logic here or ensure it ran?
+                 // Actually, if refreshData failed, we jumped strictly to catch.
+                 // We need to manually trigger the local computation part which was skipped.
+                 
+                 // COPY-PASTE logic from try block or extract to helper?
+                 // Extracting to helper 'computeLocalData' is best, but for now I will inline the fallback logic
+                 // to avoid major refactor risk in a one-shot tool.
+                 
+                 await computeSummaryLocally()
+             } else {
+                 errorMessage = error.localizedDescription
+             }
         }
         isLoading = false
+    }
+    
+    // Extracted helper to reuse in both try and catch blocks
+    private func computeSummaryLocally() async {
+        let targetMerchant = (currentMerchantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) 
+            ? merchantName.trimmingCharacters(in: .whitespacesAndNewlines)
+            : currentMerchantName.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Re-sync local state if we had to use the property
+        if currentMerchantName != targetMerchant {
+            await MainActor.run { self.currentMerchantName = targetMerchant }
+        }
+        
+        let manager = AnalyticsManager.shared
+        
+        // Ensure user merchants are loaded (from cache)
+        if availableMerchants.isEmpty || availableMerchants.count == 1 {
+             let merchants = manager.getUniqueMerchants()
+             await MainActor.run {
+                 self.availableMerchants = merchants.map { $0.capitalized }
+             }
+        }
+
+        guard let localSummary = manager.computeMerchantSummary(merchantName: targetMerchant) else {
+            errorMessage = "No data found for \(targetMerchant)"
+            return
+        }
+        
+        // 4. Fetch Receipts (Try network, ignore error if offline, maybe we should cache receipt lists too? 
+        // Receipts are fetched via APIClient.shared.fetchReceipts separately.
+        // Persistence was only added to Analytics Line Items. 
+        // So 'Recent Receipts' list might be empty offline. That is acceptable for now.)
+        // We will wrap this in try? to avoid crashing the view if offline.
+        await fetchMerchantReceipts(merchantName: targetMerchant, token: authManager.token ?? "")
+        
+        await MainActor.run {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                self.summary = localSummary
+            }
+        }
+        
+        // Re-trigger animations
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        await MainActor.run { 
+            withAnimation(.easeOut(duration: 0.8)) {
+                self.startAnimation = true
+            }
+        }
     }
 
     private func fetchMerchantReceipts(merchantName: String, token: String) async {
@@ -153,8 +234,8 @@ struct FinancialSummaryView: View {
             let allReceipts = try await APIClient.shared.fetchReceipts(token: token)
             // Fuzzy match merchant name
             let filtered = allReceipts.filter { receipt in
-                let name = (receipt.merchantName ?? "").lowercased()
-                let target = merchantName.lowercased()
+                let name = (receipt.merchantName ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let target = merchantName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 return name == target || name.contains(target) || target.contains(name)
             }
             
@@ -273,7 +354,7 @@ struct FinancialSummaryView: View {
                         // Ensure existingReceiptId is set for ScanReceiptView to know it's an update
                         let _ = { receipt.existingReceiptId = receipt.id }()
                         
-                        ScanReceiptView(image: UIImage(), data: receipt) { updated in
+                        ScanReceiptView(image: UIImage(), data: receipt, saveMode: .server) { updated in
                              Task { await loadData(isSwitching: false) }
                         }
                     }
